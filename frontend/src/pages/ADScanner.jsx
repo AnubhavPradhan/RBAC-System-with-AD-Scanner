@@ -1,0 +1,1011 @@
+import React, { useState, useEffect } from 'react'
+import { Shield, AlertTriangle, Users, UserX, Key, RefreshCw, ChevronDown, ChevronUp, Search, Server, Wifi, WifiOff, Plug, Unplug, Eye, EyeOff } from 'lucide-react'
+import api from '../utils/api'
+
+const RISK_COLORS = {
+  Critical: 'bg-red-100 text-red-800 border-red-200',
+  High: 'bg-orange-100 text-orange-800 border-orange-200',
+  Medium: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  Low: 'bg-green-100 text-green-800 border-green-200',
+  Info: 'bg-blue-100 text-blue-800 border-blue-200',
+}
+
+const RISK_BG = {
+  Critical: 'bg-red-500',
+  High: 'bg-orange-500',
+  Medium: 'bg-yellow-500',
+  Low: 'bg-green-500',
+}
+
+const ADScanner = () => {
+  // ── Connection state ──
+  const [connection, setConnection] = useState(null)          // { connected, config }
+  const [connectionLoading, setConnectionLoading] = useState(true)
+  const [connecting, setConnecting] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState(null)
+  const [showPassword, setShowPassword] = useState(false)
+  const [useMock, setUseMock] = useState(false)
+  const [connForm, setConnForm] = useState({
+    server: '',
+    port: 389,
+    use_ssl: false,
+    base_dn: '',
+    bind_user: '',
+    bind_password: '',
+    domain: '',
+  })
+
+  // ── Scanner state ──
+  const [scanData, setScanData] = useState(null)
+  const [scanning, setScanning] = useState(false)
+  const [activeTab, setActiveTab] = useState('overview')
+  const [filterRisk, setFilterRisk] = useState('All')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [expandedUser, setExpandedUser] = useState(null)
+  const [scanHistory, setScanHistory] = useState([])
+  const [mappings, setMappings] = useState([])
+  const [roles, setRoles] = useState([])
+  const [syncResult, setSyncResult] = useState(null)
+  const [showMappingModal, setShowMappingModal] = useState(false)
+  const [mappingForm, setMappingForm] = useState({ ad_group: '', rbac_role: '' })
+  const [editingMapping, setEditingMapping] = useState(null)
+
+  useEffect(() => {
+    fetchConnectionStatus()
+    fetchLatestScan()
+    fetchScanHistory()
+    fetchMappings()
+    fetchRoles()
+  }, [])
+
+  // ── Connection helpers ──
+  const fetchConnectionStatus = async () => {
+    try {
+      const { data } = await api.get('/ad-scanner/connection')
+      setConnection(data)
+      if (data.config) {
+        setConnForm(prev => ({
+          ...prev,
+          server: data.config.server || '',
+          port: data.config.port || 389,
+          use_ssl: data.config.use_ssl || false,
+          base_dn: data.config.base_dn || '',
+          bind_user: data.config.bind_user || '',
+          domain: data.config.domain || '',
+        }))
+      }
+    } catch (err) { console.error('Connection status check failed:', err) }
+    finally { setConnectionLoading(false) }
+  }
+
+  const handleTestConnection = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const { data } = await api.post('/ad-scanner/test-connection', connForm)
+      setTestResult(data)
+    } catch (err) {
+      setTestResult({ success: false, message: err.response?.data?.detail || err.message })
+    }
+    finally { setTesting(false) }
+  }
+
+  const handleConnect = async () => {
+    setConnecting(true)
+    setTestResult(null)
+    try {
+      const { data } = await api.post('/ad-scanner/connect', connForm)
+      if (data.success) {
+        setConnection({ connected: true, config: connForm })
+        setTestResult({ success: true, message: data.message })
+      } else {
+        setTestResult({ success: false, message: data.message })
+      }
+    } catch (err) {
+      setTestResult({ success: false, message: err.response?.data?.detail || err.message })
+    }
+    finally { setConnecting(false) }
+  }
+
+  const handleDisconnect = async () => {
+    if (!window.confirm('Disconnect from Active Directory?')) return
+    try {
+      await api.post('/ad-scanner/disconnect')
+      setConnection({ connected: false, config: null })
+      setConnForm({ server: '', port: 389, use_ssl: false, base_dn: '', bind_user: '', bind_password: '', domain: '' })
+      setTestResult(null)
+    } catch (err) { alert('Failed to disconnect') }
+  }
+
+  const isConnected = connection?.connected || useMock
+
+  const fetchLatestScan = async () => {
+    try {
+      const { data } = await api.get('/ad-scanner/latest')
+      if (data.scan) setScanData(data)
+    } catch (err) { console.error('Failed to fetch latest scan:', err) }
+  }
+
+  const fetchScanHistory = async () => {
+    try {
+      const { data } = await api.get('/ad-scanner/scans')
+      setScanHistory(data)
+    } catch (err) { console.error('Failed to fetch scan history:', err) }
+  }
+
+  const fetchMappings = async () => {
+    try {
+      const { data } = await api.get('/ad-scanner/mappings')
+      setMappings(data)
+    } catch (err) { console.error('Failed to fetch mappings:', err) }
+  }
+
+  const fetchRoles = async () => {
+    try {
+      const { data } = await api.get('/roles')
+      setRoles(data.map(r => r.name))
+    } catch (err) { console.error('Failed to fetch roles:', err) }
+  }
+
+  const handleRunScan = async () => {
+    setScanning(true)
+    setSyncResult(null)
+    try {
+      const { data } = await api.post('/ad-scanner/scan')
+      await fetchLatestScan()
+      await fetchScanHistory()
+    } catch (err) { alert('Scan failed: ' + (err.response?.data?.detail || err.message)) }
+    finally { setScanning(false) }
+  }
+
+  const handleSyncRoles = async () => {
+    try {
+      const { data } = await api.post('/ad-scanner/sync-roles')
+      setSyncResult(data)
+    } catch (err) { alert(err.response?.data?.detail || 'Sync failed') }
+  }
+
+  const handleSaveMapping = async (e) => {
+    e.preventDefault()
+    try {
+      if (editingMapping) {
+        await api.put(`/ad-scanner/mappings/${editingMapping.id}`, mappingForm)
+      } else {
+        await api.post('/ad-scanner/mappings', mappingForm)
+      }
+      await fetchMappings()
+      setShowMappingModal(false)
+      setEditingMapping(null)
+      setMappingForm({ ad_group: '', rbac_role: '' })
+    } catch (err) { alert(err.response?.data?.detail || 'Operation failed') }
+  }
+
+  const handleDeleteMapping = async (id) => {
+    if (!window.confirm('Delete this mapping?')) return
+    try {
+      await api.delete(`/ad-scanner/mappings/${id}`)
+      await fetchMappings()
+    } catch (err) { alert('Delete failed') }
+  }
+
+  const scan = scanData?.scan
+  const users = scanData?.users || []
+  const riskBreakdown = scanData?.risk_breakdown || []
+  const riskLevels = scanData?.risk_levels || {}
+
+  const filteredUsers = users.filter(u => {
+    const matchesRisk = filterRisk === 'All' || u.risk_level === filterRisk
+    const matchesSearch = !searchQuery ||
+      u.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.sam_account_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.email?.toLowerCase().includes(searchQuery.toLowerCase())
+    return matchesRisk && matchesSearch
+  })
+
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'users', label: 'AD Users' },
+    { id: 'risks', label: 'Risk Analysis' },
+    { id: 'mappings', label: 'Role Mappings' },
+    { id: 'history', label: 'Scan History' },
+  ]
+
+  // ── Loading state ──
+  if (connectionLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-3">
+            <Shield className="w-8 h-8 text-blue-600" />
+            Active Directory Scanner
+          </h1>
+          <p className="text-gray-600 mt-1">
+            Scan domain users, detect risky accounts, and enforce access policies
+          </p>
+        </div>
+        {isConnected && (
+          <div className="flex gap-3 items-center">
+            {connection?.connected && (
+              <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 text-sm font-medium px-3 py-2 rounded-lg">
+                <Wifi className="w-4 h-4" />
+                Connected to {connection.config?.server}
+                <button onClick={handleDisconnect} className="ml-2 text-green-500 hover:text-red-500 transition-colors" title="Disconnect">
+                  <Unplug className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            {useMock && !connection?.connected && (
+              <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 text-yellow-700 text-sm font-medium px-3 py-2 rounded-lg">
+                <Server className="w-4 h-4" /> Mock Mode
+                <button onClick={() => setUseMock(false)} className="ml-2 text-yellow-500 hover:text-red-500">✕</button>
+              </div>
+            )}
+            <button
+              onClick={handleSyncRoles}
+              disabled={!scan}
+              className="bg-purple-600 text-white px-5 py-2.5 rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              <Key className="w-4 h-4" /> Sync AD → RBAC
+            </button>
+            <button
+              onClick={handleRunScan}
+              disabled={scanning}
+              className="bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${scanning ? 'animate-spin' : ''}`} />
+              {scanning ? 'Scanning...' : 'Run AD Scan'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ──────────────────────────────────────────
+          CONNECTION FORM (shown when NOT connected)
+          ────────────────────────────────────────── */}
+      {!isConnected && (
+        <div className="max-w-2xl mx-auto">
+          <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+            {/* Form Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-6 text-white">
+              <div className="flex items-center gap-3">
+                <Server className="w-8 h-8" />
+                <div>
+                  <h2 className="text-xl font-bold">Connect to Active Directory</h2>
+                  <p className="text-blue-100 text-sm mt-0.5">Enter your domain controller details to start scanning</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Form Body */}
+            <div className="p-8 space-y-5">
+              {/* Server IP + Port Row */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Server IP / Hostname</label>
+                  <input
+                    type="text"
+                    placeholder="192.168.1.10 or dc.mylab.local"
+                    value={connForm.server}
+                    onChange={e => setConnForm({ ...connForm, server: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Port</label>
+                  <input
+                    type="number"
+                    value={connForm.port}
+                    onChange={e => setConnForm({ ...connForm, port: parseInt(e.target.value) || 389 })}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                  />
+                </div>
+              </div>
+
+              {/* Domain + Base DN Row */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Domain Name</label>
+                  <input
+                    type="text"
+                    placeholder="mylab.local"
+                    value={connForm.domain}
+                    onChange={e => setConnForm({ ...connForm, domain: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Base DN</label>
+                  <input
+                    type="text"
+                    placeholder="DC=mylab,DC=local"
+                    value={connForm.base_dn}
+                    onChange={e => setConnForm({ ...connForm, base_dn: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                  />
+                </div>
+              </div>
+
+              {/* Username */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bind Username</label>
+                <input
+                  type="text"
+                  placeholder="MYLAB\Administrator or CN=Admin,CN=Users,DC=mylab,DC=local"
+                  value={connForm.bind_user}
+                  onChange={e => setConnForm({ ...connForm, bind_user: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                />
+              </div>
+
+              {/* Password */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bind Password</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Enter password"
+                    value={connForm.bind_password}
+                    onChange={e => setConnForm({ ...connForm, bind_password: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* SSL Toggle */}
+              <div className="flex items-center gap-3">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={connForm.use_ssl}
+                    onChange={e => setConnForm({ ...connForm, use_ssl: e.target.checked, port: e.target.checked ? 636 : 389 })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-5 bg-gray-200 rounded-full peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></div>
+                </label>
+                <span className="text-sm font-medium text-gray-700">Use SSL/TLS (LDAPS on port 636)</span>
+              </div>
+
+              {/* Test result */}
+              {testResult && (
+                <div className={`rounded-lg p-4 flex items-start gap-3 ${testResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                  {testResult.success
+                    ? <Wifi className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
+                    : <WifiOff className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />}
+                  <div>
+                    <p className={`font-semibold text-sm ${testResult.success ? 'text-green-700' : 'text-red-700'}`}>
+                      {testResult.success ? 'Connection Successful' : 'Connection Failed'}
+                    </p>
+                    <p className={`text-sm mt-0.5 ${testResult.success ? 'text-green-600' : 'text-red-600'}`}>
+                      {testResult.message}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Buttons */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={handleTestConnection}
+                  disabled={testing || !connForm.server || !connForm.bind_user || !connForm.bind_password}
+                  className="flex-1 bg-gray-100 text-gray-700 font-semibold px-5 py-2.5 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 border border-gray-200"
+                >
+                  {testing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
+                  {testing ? 'Testing...' : 'Test Connection'}
+                </button>
+                <button
+                  onClick={handleConnect}
+                  disabled={connecting || !connForm.server || !connForm.bind_user || !connForm.bind_password || !connForm.base_dn}
+                  className="flex-1 bg-blue-600 text-white font-semibold px-5 py-2.5 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {connecting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plug className="w-4 h-4" />}
+                  {connecting ? 'Connecting...' : 'Connect & Save'}
+                </button>
+              </div>
+
+              {/* Divider + Mock option */}
+              <div className="relative pt-4">
+                <div className="absolute inset-0 flex items-center pt-4"><div className="w-full border-t border-gray-200"></div></div>
+                <div className="relative flex justify-center"><span className="bg-white px-4 text-sm text-gray-400">or</span></div>
+              </div>
+              <button
+                onClick={() => setUseMock(true)}
+                className="w-full bg-yellow-50 text-yellow-700 font-medium px-5 py-2.5 rounded-lg border border-yellow-200 hover:bg-yellow-100 transition-colors flex items-center justify-center gap-2"
+              >
+                <Server className="w-4 h-4" />
+                Use Mock Data (Demo Mode)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────
+          SCANNER UI (shown when connected)
+          ────────────────────────────────────────── */}
+      {isConnected && (
+      <>
+      {/* Sync Result Banner */}
+      {syncResult && (
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6 flex items-center justify-between">
+          <div>
+            <p className="font-semibold text-purple-800">AD → RBAC Sync Complete</p>
+            <p className="text-sm text-purple-600">
+              Created: {syncResult.created} | Updated: {syncResult.updated} | Skipped: {syncResult.skipped}
+            </p>
+          </div>
+          <button onClick={() => setSyncResult(null)} className="text-purple-400 hover:text-purple-600">✕</button>
+        </div>
+      )}
+
+      {/* Summary Cards */}
+      {scan && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
+            <div className="bg-blue-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
+              <Users className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <p className="text-gray-500 text-sm font-medium">Total AD Users</p>
+              <p className="text-3xl font-bold text-gray-800">{scan.total_users}</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
+            <div className="bg-red-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
+              <AlertTriangle className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <p className="text-gray-500 text-sm font-medium">High Risk Accounts</p>
+              <p className="text-3xl font-bold text-gray-800">{scan.high_risk_count}</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
+            <div className="bg-orange-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
+              <Shield className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <p className="text-gray-500 text-sm font-medium">Privileged Accounts</p>
+              <p className="text-3xl font-bold text-gray-800">{scan.privileged_users}</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
+            <div className="bg-gray-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
+              <UserX className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <p className="text-gray-500 text-sm font-medium">Stale Accounts</p>
+              <p className="text-3xl font-bold text-gray-800">{scan.stale_accounts}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div className="bg-white rounded-lg shadow-md mb-6">
+        <div className="flex border-b overflow-x-auto">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-6 py-4 font-semibold transition-colors whitespace-nowrap ${
+                activeTab === tab.id
+                  ? 'text-blue-600 border-b-2 border-blue-600'
+                  : 'text-gray-600 hover:text-gray-800'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      {!scan && activeTab !== 'mappings' && (
+        <div className="bg-white rounded-lg shadow-md p-12 text-center">
+          <Shield className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <h3 className="text-xl font-semibold text-gray-700 mb-2">No Scan Data Available</h3>
+          <p className="text-gray-500 mb-6">Run your first AD scan to see domain users and risk analysis.</p>
+          <button onClick={handleRunScan} disabled={scanning}
+            className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+            {scanning ? 'Scanning...' : 'Run First Scan'}
+          </button>
+        </div>
+      )}
+
+      {/* ─── Overview Tab ─── */}
+      {activeTab === 'overview' && scan && (
+        <div className="space-y-6">
+          {/* Scan Info */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-4">Last Scan Information</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div><span className="text-gray-500">Scan Time:</span><br /><strong>{scan.scan_timestamp}</strong></div>
+              <div><span className="text-gray-500">Source:</span><br /><strong className="uppercase">{scan.scan_source}</strong></div>
+              <div><span className="text-gray-500">Duration:</span><br /><strong>{scan.scan_duration_ms}ms</strong></div>
+              <div><span className="text-gray-500">Enabled/Disabled:</span><br /><strong>{scan.enabled_users} / {scan.disabled_users}</strong></div>
+            </div>
+          </div>
+
+          {/* Risk Breakdown Table */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-4">Risk Breakdown</h2>
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">Risk Type</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">Count</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">Severity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {riskBreakdown.map((item, idx) => (
+                  <tr key={idx} className="border-b hover:bg-gray-50">
+                    <td className="py-3 px-4 font-medium text-gray-800">{item.risk_type}</td>
+                    <td className="py-3 px-4">
+                      <span className="text-2xl font-bold text-gray-800">{item.count}</span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className={`px-3 py-1 text-xs font-semibold rounded-full ${RISK_COLORS[item.severity] || RISK_COLORS.Info}`}>
+                        {item.severity}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Risk Level Distribution */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-4">Risk Level Distribution</h2>
+            <div className="grid grid-cols-4 gap-4">
+              {['Critical', 'High', 'Medium', 'Low'].map(level => (
+                <div key={level} className="text-center">
+                  <div className={`${RISK_BG[level]} text-white rounded-xl p-4 mb-2`}>
+                    <p className="text-3xl font-bold">{riskLevels[level.toLowerCase()] || 0}</p>
+                  </div>
+                  <p className="text-sm font-semibold text-gray-600">{level}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── AD Users Tab ─── */}
+      {activeTab === 'users' && scan && (
+        <div>
+          {/* Filters */}
+          <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+            <div className="flex flex-col md:flex-row md:items-center gap-4">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="text" placeholder="Search by name, username, or email..."
+                  value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <select value={filterRisk} onChange={e => setFilterRisk(e.target.value)}
+                className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                <option value="All">All Risk Levels</option>
+                <option value="Critical">Critical</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </div>
+            <div className="mt-2 text-sm text-gray-500">
+              Showing {filteredUsers.length} of {users.length} users
+            </div>
+          </div>
+
+          {/* Users List */}
+          <div className="bg-white rounded-lg shadow-md overflow-hidden">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">User</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Last Logon</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Risk</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Flags</th>
+                  <th className="w-10"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {filteredUsers.map((user, idx) => (
+                  <React.Fragment key={idx}>
+                    <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpandedUser(expandedUser === idx ? null : idx)}>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center">
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm mr-3 ${
+                            user.is_privileged ? 'bg-red-500' : user.enabled ? 'bg-blue-500' : 'bg-gray-400'
+                          }`}>
+                            {user.display_name?.charAt(0)?.toUpperCase() || '?'}
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900">{user.display_name}</p>
+                            <p className="text-xs text-gray-500">{user.sam_account_name}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                          user.enabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        }`}>
+                          {user.enabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                        {user.is_privileged && (
+                          <span className="ml-1 px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                            Privileged
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-sm text-gray-600">
+                        {user.last_logon ? new Date(user.last_logon).toLocaleDateString() : 'Never'}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`px-3 py-1 text-xs font-semibold rounded-full ${RISK_COLORS[user.risk_level] || RISK_COLORS.Low}`}>
+                          {user.risk_level}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-sm text-gray-600">{user.risk_flags?.length || 0} flags</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        {expandedUser === idx ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                      </td>
+                    </tr>
+                    {expandedUser === idx && (
+                      <tr>
+                        <td colSpan={6} className="bg-gray-50 px-6 py-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                            <div>
+                              <p className="text-gray-500">Email</p>
+                              <p className="font-medium">{user.email || 'N/A'}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Password Last Set</p>
+                              <p className="font-medium">
+                                {user.password_last_set ? new Date(user.password_last_set).toLocaleDateString() : 'Unknown'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Password Never Expires</p>
+                              <p className={`font-medium ${user.password_never_expires ? 'text-red-600' : 'text-green-600'}`}>
+                                {user.password_never_expires ? 'Yes ⚠️' : 'No ✓'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Description</p>
+                              <p className="font-medium">{user.description || <span className="text-red-500">Blank ⚠️</span>}</p>
+                            </div>
+                            <div className="md:col-span-2">
+                              <p className="text-gray-500 mb-1">Group Memberships</p>
+                              <div className="flex flex-wrap gap-1">
+                                {(user.member_of || []).map((group, gIdx) => (
+                                  <span key={gIdx} className={`px-2 py-1 text-xs rounded-full ${
+                                    ['Domain Admins', 'Enterprise Admins', 'Administrators', 'Backup Operators'].includes(group)
+                                      ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'
+                                  }`}>
+                                    {group}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            {user.risk_flags?.length > 0 && (
+                              <div className="md:col-span-2">
+                                <p className="text-gray-500 mb-1">Risk Flags</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {user.risk_flags.map((flag, fIdx) => (
+                                    <span key={fIdx} className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-700">
+                                      ⚠ {flag}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Risk Analysis Tab ─── */}
+      {activeTab === 'risks' && scan && (
+        <div className="space-y-6">
+          {/* Privilege Escalation Check */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-4">🛡️ Privilege Escalation Check</h2>
+            <p className="text-sm text-gray-500 mb-4">Users who are members of high-privilege groups</p>
+            <div className="space-y-3">
+              {users.filter(u => u.is_privileged).map((user, idx) => (
+                <div key={idx} className="flex items-center justify-between bg-red-50 border border-red-200 rounded-lg p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center text-white font-semibold">
+                      {user.display_name?.charAt(0)?.toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800">{user.display_name}</p>
+                      <p className="text-xs text-gray-500">{user.sam_account_name}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1 max-w-md justify-end">
+                    {(user.member_of || [])
+                      .filter(g => ['Domain Admins', 'Enterprise Admins', 'Administrators', 'Backup Operators', 'Schema Admins', 'Account Operators'].includes(g))
+                      .map((g, gi) => (
+                        <span key={gi} className="px-2 py-1 text-xs font-semibold rounded-full bg-red-200 text-red-800">{g}</span>
+                      ))}
+                  </div>
+                  <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                    user.enabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                  }`}>
+                    {user.enabled ? 'Active' : 'Disabled'}
+                  </span>
+                </div>
+              ))}
+              {users.filter(u => u.is_privileged).length === 0 && (
+                <p className="text-gray-500 text-center py-4">No privileged users found</p>
+              )}
+            </div>
+          </div>
+
+          {/* Orphaned Accounts */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-4">👻 Orphaned Accounts</h2>
+            <p className="text-sm text-gray-500 mb-4">Disabled accounts still in privileged groups</p>
+            <div className="space-y-3">
+              {users.filter(u => u.is_orphaned).map((user, idx) => (
+                <div key={idx} className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gray-400 rounded-full flex items-center justify-center text-white font-semibold">
+                      {user.display_name?.charAt(0)?.toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800">{user.display_name}</p>
+                      <p className="text-xs text-gray-500">{user.email}</p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                    Orphaned
+                  </span>
+                </div>
+              ))}
+              {users.filter(u => u.is_orphaned).length === 0 && (
+                <p className="text-gray-500 text-center py-4">No orphaned accounts found</p>
+              )}
+            </div>
+          </div>
+
+          {/* Stale Accounts */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-4">⏰ Stale Accounts (&gt;90 days)</h2>
+            <p className="text-sm text-gray-500 mb-4">Users who haven't logged in for over 90 days</p>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="border-b bg-gray-50">
+                  <tr>
+                    <th className="text-left py-2 px-4 text-xs text-gray-500 uppercase">User</th>
+                    <th className="text-left py-2 px-4 text-xs text-gray-500 uppercase">Last Logon</th>
+                    <th className="text-left py-2 px-4 text-xs text-gray-500 uppercase">Status</th>
+                    <th className="text-left py-2 px-4 text-xs text-gray-500 uppercase">Risk</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {users.filter(u => u.is_stale).map((user, idx) => (
+                    <tr key={idx} className="hover:bg-gray-50">
+                      <td className="py-2 px-4 font-medium">{user.display_name}</td>
+                      <td className="py-2 px-4 text-sm text-gray-600">
+                        {user.last_logon ? new Date(user.last_logon).toLocaleDateString() : 'Never'}
+                      </td>
+                      <td className="py-2 px-4">
+                        <span className={`px-2 py-1 text-xs rounded-full ${
+                          user.enabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        }`}>{user.enabled ? 'Enabled' : 'Disabled'}</span>
+                      </td>
+                      <td className="py-2 px-4">
+                        <span className={`px-2 py-1 text-xs rounded-full ${RISK_COLORS[user.risk_level]}`}>{user.risk_level}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {users.filter(u => u.is_stale).length === 0 && (
+                <p className="text-gray-500 text-center py-4">No stale accounts found</p>
+              )}
+            </div>
+          </div>
+
+          {/* Weak Configurations */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-4">⚙️ Weak Configurations</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                <div className="flex justify-between items-center">
+                  <p className="font-semibold text-gray-800">Password Never Expires</p>
+                  <span className="text-2xl font-bold text-orange-600">{scan.password_never_expires}</span>
+                </div>
+                <p className="text-sm text-gray-500 mt-1">Accounts with non-expiring passwords violate security best practices</p>
+              </div>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex justify-between items-center">
+                  <p className="font-semibold text-gray-800">Blank Descriptions</p>
+                  <span className="text-2xl font-bold text-yellow-600">
+                    {users.filter(u => !u.description?.trim()).length}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-500 mt-1">Accounts without descriptions make auditing difficult</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Role Mappings Tab ─── */}
+      {activeTab === 'mappings' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">AD Group → RBAC Role Mappings</h2>
+                <p className="text-sm text-gray-500">Automatically assign RBAC roles based on AD group membership</p>
+              </div>
+              <button
+                onClick={() => { setEditingMapping(null); setMappingForm({ ad_group: '', rbac_role: '' }); setShowMappingModal(true) }}
+                className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                + Add Mapping
+              </button>
+            </div>
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">AD Group</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">→</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">RBAC Role</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {mappings.map(m => (
+                  <tr key={m.id} className="hover:bg-gray-50">
+                    <td className="py-3 px-4 font-medium">{m.ad_group}</td>
+                    <td className="py-3 px-4 text-gray-400">→</td>
+                    <td className="py-3 px-4">
+                      <span className="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">{m.rbac_role}</span>
+                    </td>
+                    <td className="py-3 px-4 space-x-2">
+                      <button onClick={() => { setEditingMapping(m); setMappingForm({ ad_group: m.ad_group, rbac_role: m.rbac_role }); setShowMappingModal(true) }}
+                        className="text-blue-600 hover:text-blue-900 text-sm">Edit</button>
+                      <button onClick={() => handleDeleteMapping(m.id)}
+                        className="text-red-600 hover:text-red-900 text-sm">Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {mappings.length === 0 && (
+              <p className="text-gray-500 text-center py-8">No mappings configured. Add one to enable auto role sync.</p>
+            )}
+          </div>
+
+          {/* Info Panel */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+            <h3 className="font-semibold text-blue-900 mb-2">🔐 How Dynamic RBAC Works</h3>
+            <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
+              <li>Configure AD Group → RBAC Role mappings above</li>
+              <li>Run an AD Scan to discover domain users and their group memberships</li>
+              <li>Click "Sync AD → RBAC" to automatically create/update RBAC users</li>
+              <li>Users are assigned the highest-priority role from their AD groups</li>
+            </ol>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Scan History Tab ─── */}
+      {activeTab === 'history' && (
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h2 className="text-lg font-bold text-gray-800 mb-4">Scan History</h2>
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">ID</th>
+                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Timestamp</th>
+                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Source</th>
+                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Users</th>
+                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Privileged</th>
+                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">High Risk</th>
+                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Stale</th>
+                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Duration</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {scanHistory.map(s => (
+                <tr key={s.id} className="hover:bg-gray-50">
+                  <td className="py-3 px-4 font-medium">{s.id}</td>
+                  <td className="py-3 px-4 text-sm">{s.scan_timestamp}</td>
+                  <td className="py-3 px-4">
+                    <span className={`px-2 py-1 text-xs rounded-full ${
+                      s.scan_source === 'ldap' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                    }`}>{s.scan_source.toUpperCase()}</span>
+                  </td>
+                  <td className="py-3 px-4">{s.total_users}</td>
+                  <td className="py-3 px-4 text-red-600 font-semibold">{s.privileged_users}</td>
+                  <td className="py-3 px-4 text-orange-600 font-semibold">{s.high_risk_count}</td>
+                  <td className="py-3 px-4">{s.stale_accounts}</td>
+                  <td className="py-3 px-4 text-sm text-gray-500">{s.scan_duration_ms}ms</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {scanHistory.length === 0 && (
+            <p className="text-gray-500 text-center py-8">No scans performed yet</p>
+          )}
+        </div>
+      )}
+
+      {/* ─── Mapping Modal ─── */}
+      {showMappingModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-8 max-w-md w-full">
+            <h2 className="text-2xl font-bold mb-6 text-gray-800">
+              {editingMapping ? 'Edit Mapping' : 'Add Group Mapping'}
+            </h2>
+            <form onSubmit={handleSaveMapping}>
+              <div className="mb-4">
+                <label className="block text-gray-700 text-sm font-bold mb-2">AD Group Name</label>
+                <input type="text" value={mappingForm.ad_group}
+                  onChange={e => setMappingForm({ ...mappingForm, ad_group: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g., Domain Admins, Web_Editors" required />
+              </div>
+              <div className="mb-6">
+                <label className="block text-gray-700 text-sm font-bold mb-2">RBAC Role</label>
+                <select value={mappingForm.rbac_role}
+                  onChange={e => setMappingForm({ ...mappingForm, rbac_role: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                  <option value="">Select a role...</option>
+                  {roles.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div className="flex justify-end space-x-3">
+                <button type="button" onClick={() => { setShowMappingModal(false); setEditingMapping(null) }}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                  {editingMapping ? 'Update' : 'Create'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      </>
+      )}
+    </div>
+  )
+}
+
+export default ADScanner
