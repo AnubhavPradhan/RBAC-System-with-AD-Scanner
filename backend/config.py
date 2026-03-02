@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     AD_BASE_DN: str = os.getenv("AD_BASE_DN", "DC=example,DC=com")
     AD_BIND_USER: str = os.getenv("AD_BIND_USER", "")     # service account
     AD_BIND_PASSWORD: str = os.getenv("AD_BIND_PASSWORD", "")
-    AD_USE_MOCK: bool = True  # Use simulated AD data when no real AD available
+    AD_USE_MOCK: bool = False  # Use simulated AD data when no real AD available
 
     # ── Risk thresholds ──
     STALE_ACCOUNT_DAYS: int = 90

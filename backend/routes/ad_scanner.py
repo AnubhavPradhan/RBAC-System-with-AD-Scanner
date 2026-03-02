@@ -171,8 +171,15 @@ def disconnect(current_user: User = Depends(get_current_user), db: Session = Dep
 @router.post("/scan")
 def trigger_scan(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Run a new AD scan (LDAP or mock) and return full results."""
-    result = run_scan(db, triggered_by=current_user.email)
-    return result
+    try:
+        result = run_scan(db, triggered_by=current_user.email)
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Scan failed: {e}")
 
 
 # ──────────────────────────────────────────
@@ -237,7 +244,23 @@ def latest_scan(current_user: User = Depends(get_current_user), db: Session = De
     # Build risk breakdown
     from ad_scanner.risk_engine import generate_risk_summary
     risk_summary = generate_risk_summary([
-        {**u, "member_of": json.loads(u.member_of) if u.member_of else []}
+        {
+            "sam_account_name": u.sam_account_name,
+            "display_name": u.display_name,
+            "email": u.email,
+            "enabled": u.enabled,
+            "last_logon": str(u.last_logon) if u.last_logon else None,
+            "password_last_set": str(u.password_last_set) if u.password_last_set else None,
+            "password_never_expires": u.password_never_expires,
+            "description": u.description or "",
+            "member_of": json.loads(u.member_of) if u.member_of else [],
+            "is_privileged": u.is_privileged,
+            "is_stale": u.is_stale,
+            "is_inactive": u.is_inactive,
+            "is_orphaned": u.is_orphaned,
+            "risk_level": u.risk_level,
+            "risk_flags": json.loads(u.risk_flags) if u.risk_flags else [],
+        }
         for u in ad_users
     ])
 
@@ -387,6 +410,8 @@ def sync_ad_roles(current_user: User = Depends(get_current_user), db: Session = 
     scan = db.query(ADScanResult).order_by(ADScanResult.id.desc()).first()
     if not scan:
         raise HTTPException(400, "No AD scan results. Run a scan first.")
+    if scan.scan_source == "mock":
+        raise HTTPException(400, "Last scan used mock data. Run a real AD scan before syncing.")
 
     mappings = db.query(ADGroupMapping).all()
     if not mappings:

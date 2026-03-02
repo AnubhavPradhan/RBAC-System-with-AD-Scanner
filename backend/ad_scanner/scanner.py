@@ -3,6 +3,7 @@ Core AD scanner: tries real LDAP first, falls back to mock data.
 """
 import json
 import time
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -12,6 +13,8 @@ from config import settings
 from database import ADScanResult, ADUser, AuditLog
 from ad_scanner.mock_ad import generate_mock_ad_users
 from ad_scanner.risk_engine import analyze_user_risk, generate_risk_summary
+
+logger = logging.getLogger(__name__)
 
 
 def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
@@ -40,15 +43,19 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
             ad_bind_password = cfg.bind_password
 
     if not ad_server or not ad_bind_user:
+        logger.warning("[AD Scanner] No AD server or bind user configured. ad_server=%r, ad_bind_user=%r", ad_server, ad_bind_user)
         return None
 
     try:
         from ldap3 import Server, Connection, ALL, SUBTREE, Tls
-        import ssl
+        import ssl as ssl_mod
+
+        logger.info("[AD Scanner] Connecting to %s:%d (SSL=%s) as %s, base=%s",
+                     ad_server, ad_port, ad_use_ssl, ad_bind_user, ad_base_dn)
 
         tls_config = None
         if ad_use_ssl:
-            tls_config = Tls(validate=ssl.CERT_NONE)
+            tls_config = Tls(validate=ssl_mod.CERT_NONE)
 
         server = Server(
             ad_server,
@@ -56,6 +63,7 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
             use_ssl=ad_use_ssl,
             tls=tls_config,
             get_info=ALL,
+            connect_timeout=10,
         )
 
         conn = Connection(
@@ -63,7 +71,10 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
             user=ad_bind_user,
             password=ad_bind_password,
             auto_bind=True,
+            receive_timeout=10,
         )
+
+        logger.info("[AD Scanner] LDAP bound successfully, searching %s", ad_base_dn)
 
         # Search for all user objects
         conn.search(
@@ -80,8 +91,15 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
         for entry in conn.entries:
             attrs = entry.entry_attributes_as_dict
 
+            def _get(key, default=""):
+                """Safely get first value from an LDAP attribute list."""
+                val = attrs.get(key)
+                if val and len(val) > 0:
+                    return val[0]
+                return default
+
             # Parse userAccountControl flags
-            uac = int(attrs.get("userAccountControl", [512])[0])
+            uac = int(_get("userAccountControl", 512))
             enabled = not bool(uac & 0x0002)          # ACCOUNTDISABLE
             pwd_never_expires = bool(uac & 0x10000)    # DONT_EXPIRE_PASSWORD
 
@@ -94,7 +112,7 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
 
             # Parse timestamps
             last_logon = None
-            ll_raw = attrs.get("lastLogonTimestamp", [None])[0]
+            ll_raw = _get("lastLogonTimestamp", None)
             if ll_raw:
                 try:
                     last_logon = ll_raw.isoformat() if hasattr(ll_raw, "isoformat") else str(ll_raw)
@@ -102,7 +120,7 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
                     pass
 
             pwd_set = None
-            ps_raw = attrs.get("pwdLastSet", [None])[0]
+            ps_raw = _get("pwdLastSet", None)
             if ps_raw:
                 try:
                     pwd_set = ps_raw.isoformat() if hasattr(ps_raw, "isoformat") else str(ps_raw)
@@ -128,14 +146,14 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
                     pass
 
             users.append({
-                "sam_account_name": str(attrs.get("sAMAccountName", [""])[0]),
-                "display_name": str(attrs.get("displayName", [""])[0]),
-                "email": str(attrs.get("mail", [""])[0]),
+                "sam_account_name": str(_get("sAMAccountName")),
+                "display_name": str(_get("displayName")) or str(_get("sAMAccountName")),
+                "email": str(_get("mail")),
                 "enabled": enabled,
                 "last_logon": last_logon,
                 "password_last_set": pwd_set,
                 "password_never_expires": pwd_never_expires,
-                "description": str(attrs.get("description", [""])[0]),
+                "description": str(_get("description")),
                 "member_of": groups,
                 "is_privileged": is_priv,
                 "is_stale": is_stale,
@@ -143,13 +161,14 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
             })
 
         conn.unbind()
-        return users if users else None
+        logger.info("[AD Scanner] LDAP scan complete: %d users found", len(users))
+        return users  # return even if empty — successful LDAP with no results
 
     except ImportError:
-        print("ldap3 not installed, falling back to mock data")
+        logger.error("[AD Scanner] ldap3 not installed — cannot scan real AD")
         return None
     except Exception as e:
-        print(f"LDAP connection failed: {e}")
+        logger.error("[AD Scanner] LDAP connection/search failed: %s", e, exc_info=True)
         return None
 
 
@@ -167,6 +186,11 @@ def run_scan(db: Session, triggered_by: str = "system") -> dict:
     source = "ldap"
     raw_users = _try_ldap_scan(db=db)
     if raw_users is None:
+        if not settings.AD_USE_MOCK:
+            raise RuntimeError(
+                "LDAP scan failed and AD_USE_MOCK is disabled. "
+                "Check your AD connection settings."
+            )
         source = "mock"
         raw_users = generate_mock_ad_users(count=50)
 

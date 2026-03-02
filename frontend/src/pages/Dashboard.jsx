@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Users, ShieldCheck, Lock, Activity, Shield, AlertTriangle, UserX, Key } from 'lucide-react'
+import { Users, ShieldCheck, Lock, Activity } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend
@@ -13,13 +13,6 @@ const STAT_META = [
   { label: 'Admin Users',    Icon: Activity,     color: 'bg-orange-500' },
 ]
 
-const AD_STAT_META = [
-  { key: 'totalADUsers',       label: 'AD Users',          Icon: Shield,          color: 'bg-indigo-500' },
-  { key: 'highRiskAccounts',   label: 'High Risk',         Icon: AlertTriangle,   color: 'bg-red-500' },
-  { key: 'privilegedAccounts', label: 'Privileged',        Icon: Key,             color: 'bg-amber-500' },
-  { key: 'staleAccounts',      label: 'Stale Accounts',    Icon: UserX,           color: 'bg-gray-500' },
-]
-
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const PIE_COLORS = ['#f59e0b', '#10b981', '#3b82f6', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6']
 
@@ -30,7 +23,6 @@ const Dashboard = () => {
   const [recentActivity, setRecentActivity] = useState([])
   const [weeklyData, setWeeklyData] = useState(DAYS.map(d => ({ day: d, Logins: 0, Actions: 0 })))
   const [roleData, setRoleData] = useState([])
-  const [adStats, setAdStats] = useState(null)
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -42,7 +34,6 @@ const Dashboard = () => {
           { ...STAT_META[2], value: String(data.totalPermissions) },
           { ...STAT_META[3], value: String(data.totalUsers - (data.totalUsers - 1)) },
         ])
-        if (data.adSummary) setAdStats(data.adSummary)
       } catch (err) {
         console.error('Failed to fetch stats:', err)
       }
@@ -130,29 +121,6 @@ const Dashboard = () => {
           </div>
         ))}
       </div>
-
-      {/* AD Scanner Summary */}
-      {adStats && (
-        <div className="mb-8">
-          <h2 className="text-lg font-bold text-gray-700 mb-4 flex items-center gap-2">
-            <Shield className="w-5 h-5 text-indigo-600" />
-            Active Directory Overview
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {AD_STAT_META.map((meta, idx) => (
-              <div key={idx} className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-                <div className={`${meta.color} w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center`}>
-                  <meta.Icon className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <p className="text-gray-500 text-sm font-medium mb-1">{meta.label}</p>
-                  <p className="text-3xl font-bold text-gray-800">{adStats[meta.key] ?? '—'}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-6 mb-8">

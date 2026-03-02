@@ -104,6 +104,49 @@ def security_summary(current_user: User = Depends(get_current_user), db: Session
     return [{"action": r.action, "severity": r.severity, "count": r.count} for r in rows]
 
 
+@router.get("/compliance")
+def compliance_report(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Role assignment view with permission counts for compliance auditing."""
+    roles = db.query(Role).all()
+    result = []
+    for r in roles:
+        user_count = db.query(User).filter(User.role == r.name).count()
+        perm_count = len(r.permissions) if r.permissions else 0
+        result.append({
+            "role": r.name,
+            "description": r.description,
+            "user_count": user_count,
+            "permission_count": perm_count,
+        })
+    return result
+
+
+@router.get("/ad-scanner")
+def ad_scanner_report(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Report based on the latest AD scan – one row per AD user."""
+    import json as _json
+    latest = db.query(ADScanResult).order_by(ADScanResult.id.desc()).first()
+    if not latest:
+        return []
+    from database import ADUser
+    users = db.query(ADUser).filter(ADUser.scan_id == latest.id).all()
+    return [
+        {
+            "sam_account_name": u.sam_account_name,
+            "display_name": u.display_name,
+            "email": u.email or "",
+            "enabled": "Yes" if u.enabled else "No",
+            "is_privileged": "Yes" if u.is_privileged else "No",
+            "risk_level": u.risk_level or "Low",
+            "is_stale": "Yes" if u.is_stale else "No",
+            "is_inactive": "Yes" if u.is_inactive else "No",
+            "last_logon": str(u.last_logon) if u.last_logon else "N/A",
+            "risk_flags": ", ".join(_json.loads(u.risk_flags)) if u.risk_flags else "",
+        }
+        for u in users
+    ]
+
+
 @router.get("/system-usage")
 def system_usage(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = (

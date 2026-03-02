@@ -45,11 +45,6 @@ const Reports = () => {
       description: 'Changes to permissions and access rights',
     },
     {
-      id: 'role-assignment',
-      name: 'Role Assignment Report',
-      description: 'Role changes and assignments over time',
-    },
-    {
       id: 'security-summary',
       name: 'Security Summary',
       description: 'Security events and access violations',
@@ -58,6 +53,11 @@ const Reports = () => {
       id: 'compliance',
       name: 'Compliance Report',
       description: 'Regulatory compliance and access control',
+    },
+    {
+      id: 'ad-scanner',
+      name: 'AD Scanner Report',
+      description: 'Active Directory scan results and risk analysis',
     },
     {
       id: 'system-usage',
@@ -77,11 +77,11 @@ const Reports = () => {
 
       const endpointMap = {
         'user-activity': '/reports/user-activity',
-        'role-assignment': '/reports/role-assignment',
         'permission-audit': '/reports/permission-audit',
         'security-summary': '/reports/security-summary',
         'system-usage': '/reports/system-usage',
-        'compliance': '/reports/role-assignment', // fallback
+        'compliance': '/reports/compliance',
+        'ad-scanner': '/reports/ad-scanner',
       }
 
       const endpoint = endpointMap[report.id] || '/reports/user-activity'
