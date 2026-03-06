@@ -9,7 +9,6 @@ import Dashboard from './pages/Dashboard'
 import Users from './pages/Users'
 import Roles from './pages/Roles'
 import Permissions from './pages/Permissions'
-import Analytics from './pages/Analytics'
 import Reports from './pages/Reports'
 import AuditLogs from './pages/AuditLogs'
 import Settings from './pages/Settings'
@@ -58,16 +57,6 @@ function App() {
               <ProtectedRoute requiredPermission="manage_permissions">
                 <Layout>
                   <Permissions />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/analytics"
-            element={
-              <ProtectedRoute requiredPermission="view_analytics">
-                <Layout>
-                  <Analytics />
                 </Layout>
               </ProtectedRoute>
             }

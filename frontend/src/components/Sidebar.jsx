@@ -17,7 +17,6 @@ const Sidebar = () => {
     { path: '/users', name: 'Users', icon: '/icons/Users.svg', permission: 'manage_users' },
     { path: '/roles', name: 'Roles', icon: '/icons/Roles.png', permission: 'manage_roles' },
     { path: '/permissions', name: 'Permissions', icon: '/icons/Permissions.png', permission: 'manage_permissions' },
-    { path: '/analytics', name: 'Analytics', icon: '/icons/Analytics.png', permission: 'view_analytics' },
     { path: '/reports', name: 'Reports', icon: '/icons/Reports.png', permission: 'view_reports' },
     { path: '/audit-logs', name: 'Audit Logs', icon: '/icons/AuditLogs.png', permission: 'view_audit_logs' },
     { path: '/ad-scanner', name: 'AD Scanner', icon: '/icons/Active-directory.png', permission: 'manage_ad_scanner' },
