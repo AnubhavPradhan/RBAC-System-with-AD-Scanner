@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { Shield, AlertTriangle, Users, UserX, Key, RefreshCw, ChevronDown, ChevronUp, Search, Server, Wifi, WifiOff, Plug, Unplug, Eye, EyeOff } from 'lucide-react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { Shield, AlertTriangle, Users, UserX, Key, RefreshCw, ChevronDown, ChevronUp, Search, Server, Wifi, WifiOff, Plug, Unplug, Eye, EyeOff, XCircle, CheckCircle, Info, AlertCircle, X } from 'lucide-react'
 import api from '../utils/api'
 
 const RISK_COLORS = {
@@ -25,7 +25,6 @@ const ADScanner = () => {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
   const [showPassword, setShowPassword] = useState(false)
-  const [useMock, setUseMock] = useState(false)
   const [connForm, setConnForm] = useState({
     server: '',
     port: 389,
@@ -35,6 +34,20 @@ const ADScanner = () => {
     bind_password: '',
     domain: '',
   })
+
+  // ── Notification / Confirm state ──
+  const [notification, setNotification] = useState(null)   // { type: 'error'|'success'|'warning'|'info', message }
+  const [confirmDialog, setConfirmDialog] = useState(null) // { message, onConfirm }
+
+  const showNotification = useCallback((type, message) => {
+    setNotification({ type, message })
+  }, [])
+
+  const showConfirm = useCallback((message) => {
+    return new Promise(resolve => {
+      setConfirmDialog({ message, onConfirm: resolve })
+    })
+  }, [])
 
   // ── Scanner state ──
   const [scanData, setScanData] = useState(null)
@@ -109,16 +122,17 @@ const ADScanner = () => {
   }
 
   const handleDisconnect = async () => {
-    if (!window.confirm('Disconnect from Active Directory?')) return
+    const confirmed = await showConfirm('Disconnect from Active Directory?')
+    if (!confirmed) return
     try {
       await api.post('/ad-scanner/disconnect')
       setConnection({ connected: false, config: null })
       setConnForm({ server: '', port: 389, use_ssl: false, base_dn: '', bind_user: '', bind_password: '', domain: '' })
       setTestResult(null)
-    } catch (err) { alert('Failed to disconnect') }
+    } catch (err) { showNotification('error', 'Failed to disconnect') }
   }
 
-  const isConnected = connection?.connected || useMock
+  const isConnected = connection?.connected
 
   const fetchLatestScan = async () => {
     try {
@@ -155,7 +169,7 @@ const ADScanner = () => {
       const { data } = await api.post('/ad-scanner/scan')
       await fetchLatestScan()
       await fetchScanHistory()
-    } catch (err) { alert('Scan failed: ' + (err.response?.data?.detail || err.message)) }
+    } catch (err) { showNotification('error', 'Scan failed: ' + (err.response?.data?.detail || err.message)) }
     finally { setScanning(false) }
   }
 
@@ -163,7 +177,7 @@ const ADScanner = () => {
     try {
       const { data } = await api.post('/ad-scanner/sync-roles')
       setSyncResult(data)
-    } catch (err) { alert(err.response?.data?.detail || 'Sync failed') }
+    } catch (err) { showNotification('error', err.response?.data?.detail || 'Sync failed') }
   }
 
   const handleSaveMapping = async (e) => {
@@ -178,15 +192,16 @@ const ADScanner = () => {
       setShowMappingModal(false)
       setEditingMapping(null)
       setMappingForm({ ad_group: '', rbac_role: '' })
-    } catch (err) { alert(err.response?.data?.detail || 'Operation failed') }
+    } catch (err) { showNotification('error', err.response?.data?.detail || 'Operation failed') }
   }
 
   const handleDeleteMapping = async (id) => {
-    if (!window.confirm('Delete this mapping?')) return
+    const confirmed = await showConfirm('Delete this mapping?')
+    if (!confirmed) return
     try {
       await api.delete(`/ad-scanner/mappings/${id}`)
       await fetchMappings()
-    } catch (err) { alert('Delete failed') }
+    } catch (err) { showNotification('error', 'Delete failed') }
   }
 
   const scan = scanData?.scan
@@ -220,8 +235,84 @@ const ADScanner = () => {
     )
   }
 
+  // ── Notification config ──
+  const notificationConfig = {
+    error:   { icon: XCircle,       bg: 'bg-red-50',     border: 'border-red-300',   icon_color: 'text-red-500',    title: 'Error' },
+    success: { icon: CheckCircle,   bg: 'bg-green-50',   border: 'border-green-300', icon_color: 'text-green-500',  title: 'Success' },
+    warning: { icon: AlertCircle,   bg: 'bg-yellow-50',  border: 'border-yellow-300',icon_color: 'text-yellow-500', title: 'Warning' },
+    info:    { icon: Info,          bg: 'bg-blue-50',    border: 'border-blue-300',  icon_color: 'text-blue-500',   title: 'Information' },
+  }
+
   return (
     <div>
+      {/* Custom Notification Modal */}
+      {notification && (() => {
+        const cfg = notificationConfig[notification.type] || notificationConfig.info
+        const Icon = cfg.icon
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setNotification(null)} />
+            <div className={`relative z-10 w-full max-w-md mx-4 rounded-2xl shadow-2xl border-2 ${cfg.bg} ${cfg.border} p-6`}>
+              <div className="flex items-start gap-4">
+                <div className={`flex-shrink-0 mt-0.5 ${cfg.icon_color}`}>
+                  <Icon className="w-7 h-7" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-base font-semibold text-gray-800 mb-1">{cfg.title}</h3>
+                  <p className="text-sm text-gray-600 break-words">{notification.message}</p>
+                </div>
+                <button
+                  onClick={() => setNotification(null)}
+                  className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="mt-5 flex justify-end">
+                <button
+                  onClick={() => setNotification(null)}
+                  className="px-5 py-2 bg-gray-800 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors"
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Custom Confirm Dialog */}
+      {confirmDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+          <div className="relative z-10 w-full max-w-sm mx-4 rounded-2xl shadow-2xl border-2 bg-white border-gray-200 p-6">
+            <div className="flex items-start gap-4">
+              <div className="flex-shrink-0 mt-0.5 text-yellow-500">
+                <AlertCircle className="w-7 h-7" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-semibold text-gray-800 mb-1">Confirm</h3>
+                <p className="text-sm text-gray-600">{confirmDialog.message}</p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                onClick={() => { setConfirmDialog(null); confirmDialog.onConfirm(false) }}
+                className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setConfirmDialog(null); confirmDialog.onConfirm(true) }}
+                className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
@@ -244,12 +335,7 @@ const ADScanner = () => {
                 </button>
               </div>
             )}
-            {useMock && !connection?.connected && (
-              <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 text-yellow-700 text-sm font-medium px-3 py-2 rounded-lg">
-                <Server className="w-4 h-4" /> Mock Mode
-                <button onClick={() => setUseMock(false)} className="ml-2 text-yellow-500 hover:text-red-500">✕</button>
-              </div>
-            )}
+
             <button
               onClick={handleSyncRoles}
               disabled={!scan}
@@ -419,18 +505,7 @@ const ADScanner = () => {
                 </button>
               </div>
 
-              {/* Divider + Mock option */}
-              <div className="relative pt-4">
-                <div className="absolute inset-0 flex items-center pt-4"><div className="w-full border-t border-gray-200"></div></div>
-                <div className="relative flex justify-center"><span className="bg-white px-4 text-sm text-gray-400">or</span></div>
-              </div>
-              <button
-                onClick={() => setUseMock(true)}
-                className="w-full bg-yellow-50 text-yellow-700 font-medium px-5 py-2.5 rounded-lg border border-yellow-200 hover:bg-yellow-100 transition-colors flex items-center justify-center gap-2"
-              >
-                <Server className="w-4 h-4" />
-                Use Mock Data (Demo Mode)
-              </button>
+
             </div>
           </div>
         </div>

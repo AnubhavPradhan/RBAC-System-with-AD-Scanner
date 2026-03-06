@@ -186,13 +186,9 @@ def run_scan(db: Session, triggered_by: str = "system") -> dict:
     source = "ldap"
     raw_users = _try_ldap_scan(db=db)
     if raw_users is None:
-        if not settings.AD_USE_MOCK:
-            raise RuntimeError(
-                "LDAP scan failed and AD_USE_MOCK is disabled. "
-                "Check your AD connection settings."
-            )
-        source = "mock"
-        raw_users = generate_mock_ad_users(count=50)
+        raise RuntimeError(
+            "LDAP scan failed. Check your AD connection settings."
+        )
 
     # ── Analyze each user ──
     analyzed_users = [analyze_user_risk(u) for u in raw_users]
