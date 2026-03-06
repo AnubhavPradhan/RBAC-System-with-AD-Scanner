@@ -235,13 +235,9 @@ const AuditLogs = () => {
             <tbody>
               {filteredLogs.map((log) => (
                 <tr key={log.id} className="border-b hover:bg-gray-50">
-                  <td className="py-3 px-4 text-sm text-gray-600">{log.timestamp}</td>
+                  <td className="py-3 px-4 text-sm text-gray-600">{log.timestamp ? log.timestamp.split('.')[0] : ''}</td>
                   <td className="py-3 px-4 font-medium">{log.user_email}</td>
-                  <td className="py-3 px-4">
-                    <span className="bg-gray-100 text-gray-700 py-1 px-3 rounded-full text-sm">
-                      {log.action}
-                    </span>
-                  </td>
+                  <td className="py-3 px-4 text-sm text-gray-600">{log.action}</td>
                   <td className="py-3 px-4 text-gray-600">{log.resource}</td>
                   <td className="py-3 px-4 text-sm text-gray-600">{log.details}</td>
                   <td className="py-3 px-4">
