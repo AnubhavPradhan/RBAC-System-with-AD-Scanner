@@ -35,6 +35,7 @@ def _user_dict(u: User) -> dict:
         "id": u.id, "name": u.name, "username": u.username,
         "email": u.email, "role": u.role, "status": u.status,
         "created_at": str(u.created_at),
+        "last_login": str(u.last_login).split('.')[0] if u.last_login else None,
     }
 
 

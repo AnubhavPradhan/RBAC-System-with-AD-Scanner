@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
+from datetime import datetime
 from database import get_db, User, AuditLog, Role, Permission, role_permissions
 from auth import verify_password, hash_password, create_access_token, get_current_user
 
@@ -71,6 +72,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
     token = create_access_token({"id": user.id, "email": user.email, "role": user.role, "name": user.name})
 
+    user.last_login = datetime.utcnow()
     db.add(AuditLog(user_email=user.email, action="Login", resource="Auth",
                     details=f"User logged in: {user.email}", severity="Info"))
     db.commit()

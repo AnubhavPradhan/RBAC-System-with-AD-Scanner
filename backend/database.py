@@ -72,6 +72,7 @@ class User(Base):
     role = Column(String(100), default="Viewer")
     status = Column(String(20), default="Active")
     created_at = Column(DateTime, default=datetime.utcnow)
+    last_login = Column(DateTime, nullable=True)
 
 
 class AuditLog(Base):
@@ -152,6 +153,13 @@ class ADConnectionConfig(Base):
 # ── Create all tables ──
 def init_db():
     Base.metadata.create_all(bind=engine)
+    # Add last_login column if it doesn't exist yet (safe migration for SQLite)
+    with engine.connect() as conn:
+        try:
+            conn.execute(__import__('sqlalchemy').text("ALTER TABLE users ADD COLUMN last_login DATETIME"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
 
 
 def get_db():
