@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from datetime import datetime
-from database import get_db, User, AuditLog, Role, Permission, role_permissions
+from database import get_db, User, AuditLog, Role, Permission
 from auth import verify_password, hash_password, create_access_token, get_current_user
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
@@ -27,14 +27,13 @@ class SignupRequest(BaseModel):
 
 
 def _get_user_permissions(db: Session, role_name: str) -> list[str]:
-    rows = (
-        db.query(Permission.name)
-        .join(role_permissions, Permission.id == role_permissions.c.permission_id)
-        .join(Role, Role.id == role_permissions.c.role_id)
-        .filter(Role.name == role_name)
-        .all()
-    )
-    return [r[0] for r in rows]
+    # Use ORM relationship with explicit refresh so we always read from DB,
+    # not from SQLAlchemy's identity-map cache (critical after admin updates)
+    role = db.query(Role).filter(Role.name == role_name).first()
+    if not role:
+        return []
+    db.refresh(role)   # force reload including the many-to-many relationship
+    return [p.name for p in role.permissions]
 
 
 def _user_dict(user: User, permissions: list[str]) -> dict:
@@ -115,6 +114,7 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
 
 @router.get("/me")
 def get_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    permissions = _get_user_permissions(db, current_user.role)
     return {
         "id": current_user.id,
         "name": current_user.name,
@@ -123,6 +123,7 @@ def get_me(current_user: User = Depends(get_current_user), db: Session = Depends
         "role": current_user.role,
         "status": current_user.status,
         "created_at": str(current_user.created_at),
+        "permissions": permissions,
     }
 
 

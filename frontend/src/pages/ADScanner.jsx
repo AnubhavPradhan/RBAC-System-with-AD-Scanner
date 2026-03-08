@@ -814,7 +814,7 @@ const ADScanner = () => {
         <div className="space-y-6">
           {/* Privilege Escalation Check */}
           <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">🛡️ Privilege Escalation Check</h2>
+            <h2 className="text-lg font-bold text-gray-800 mb-4">Privilege Escalation Check</h2>
             <p className="text-sm text-gray-500 mb-4">Users who are members of high-privilege groups</p>
             <div className="space-y-3">
               {users.filter(u => u.is_privileged).map((user, idx) => (
@@ -850,7 +850,7 @@ const ADScanner = () => {
 
           {/* Orphaned Accounts */}
           <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">👻 Orphaned Accounts</h2>
+            <h2 className="text-lg font-bold text-gray-800 mb-4">Orphaned Accounts</h2>
             <p className="text-sm text-gray-500 mb-4">Disabled accounts still in privileged groups</p>
             <div className="space-y-3">
               {users.filter(u => u.is_orphaned).map((user, idx) => (
@@ -877,7 +877,7 @@ const ADScanner = () => {
 
           {/* Stale Accounts */}
           <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">⏰ Stale Accounts (&gt;90 days)</h2>
+            <h2 className="text-lg font-bold text-gray-800 mb-4">Stale Accounts (&gt;90 days)</h2>
             <p className="text-sm text-gray-500 mb-4">Users who haven't logged in for over 90 days</p>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -916,7 +916,7 @@ const ADScanner = () => {
 
           {/* Weak Configurations */}
           <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">⚙️ Weak Configurations</h2>
+            <h2 className="text-lg font-bold text-gray-800 mb-4">Weak Configurations</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
                 <div className="flex justify-between items-center">
@@ -989,7 +989,7 @@ const ADScanner = () => {
 
           {/* Info Panel */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-            <h3 className="font-semibold text-blue-900 mb-2">🔐 How Dynamic RBAC Works</h3>
+            <h3 className="font-semibold text-blue-900 mb-2">How Dynamic RBAC Works</h3>
             <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
               <li>Configure AD Group → RBAC Role mappings above</li>
               <li>Run an AD Scan to discover domain users and their group memberships</li>

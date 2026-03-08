@@ -15,11 +15,33 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const token = localStorage.getItem('rbac-token')
-    const storedUser = localStorage.getItem('rbac-current-user')
-    if (token && storedUser) {
-      setCurrentUser(JSON.parse(storedUser))
+    if (!token) {
+      setLoading(false)
+      return
     }
-    setLoading(false)
+    // Fetch fresh user+permissions from server on every startup
+    api.get('/auth/me')
+      .then(({ data }) => {
+        const stored = localStorage.getItem('rbac-current-user')
+        const storedUser = stored ? JSON.parse(stored) : {}
+        // Always prefer server-returned permissions; fall back to stored if server omits them
+        const freshUser = {
+          ...storedUser,
+          ...data,
+          permissions: (Array.isArray(data.permissions) ? data.permissions : null)
+                       ?? storedUser.permissions
+                       ?? []
+        }
+        localStorage.setItem('rbac-current-user', JSON.stringify(freshUser))
+        setCurrentUser(freshUser)
+      })
+      .catch(() => {
+        // Token expired or invalid — clear session
+        localStorage.removeItem('rbac-token')
+        localStorage.removeItem('rbac-current-user')
+        setCurrentUser(null)
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   const login = async (emailOrUsername, password) => {
@@ -56,7 +78,9 @@ export const AuthProvider = ({ children }) => {
   const hasPermission = (permissionName) => {
     if (!currentUser) return false
     if (currentUser.role === 'Admin') return true
-    return currentUser.permissions?.includes(permissionName) || false
+    const perms = currentUser.permissions
+    if (!Array.isArray(perms)) return false
+    return perms.includes(permissionName)
   }
 
   const value = { currentUser, login, signup, logout, hasPermission, loading }

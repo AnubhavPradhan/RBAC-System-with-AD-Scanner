@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { Pencil, Trash2 } from 'lucide-react'
 import api from '../utils/api'
 
 const Roles = () => {
@@ -115,15 +116,17 @@ const Roles = () => {
               <div className="flex space-x-2">
                 <button 
                   onClick={() => handleEditRole(role)}
-                  className="text-blue-600 hover:text-blue-800"
+                  className="text-gray-500 hover:text-blue-600 transition-colors"
+                  title="Edit"
                 >
-                  ✏️
+                  <Pencil className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => handleDeleteRole(role.id)}
-                  className="text-red-600 hover:text-red-800"
+                  className="text-red-500 hover:text-red-700 transition-colors"
+                  title="Delete"
                 >
-                  🗑️
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
             </div>

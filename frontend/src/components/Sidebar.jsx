@@ -17,9 +17,9 @@ const Sidebar = () => {
     { path: '/users', name: 'Users', icon: '/icons/Users.svg', permission: 'manage_users' },
     { path: '/roles', name: 'Roles', icon: '/icons/Roles.png', permission: 'manage_roles' },
     { path: '/permissions', name: 'Permissions', icon: '/icons/Permissions.png', permission: 'manage_permissions' },
+    { path: '/ad-scanner', name: 'AD Scanner', icon: '/icons/Active-directory.png', permission: 'manage_ad_scanner' },
     { path: '/reports', name: 'Reports', icon: '/icons/Reports.png', permission: 'view_reports' },
     { path: '/audit-logs', name: 'Audit Logs', icon: '/icons/AuditLogs.png', permission: 'view_audit_logs' },
-    { path: '/ad-scanner', name: 'AD Scanner', icon: '/icons/Active-directory.png', permission: 'manage_ad_scanner' },
     { path: '/settings', name: 'Settings', icon: '/icons/Settings.svg', permission: null },
   ]
 
@@ -31,7 +31,7 @@ const Sidebar = () => {
   return (
     <aside className="w-64 bg-gray-800 text-white min-h-screen fixed top-0 left-0 flex flex-col">
       <div className="p-6 flex-1 overflow-y-auto">
-        <h1 className="text-2xl font-bold mb-8">RBAC System</h1>
+        <h1 className="text-2xl font-bold mb-8">RBAC & AD Scanner</h1>
         <nav>
           <ul className="space-y-2">
             {visibleMenuItems.map((item) => (
