@@ -63,6 +63,25 @@ const ADScanner = () => {
   const [showMappingModal, setShowMappingModal] = useState(false)
   const [mappingForm, setMappingForm] = useState({ ad_group: '', rbac_role: '' })
   const [editingMapping, setEditingMapping] = useState(null)
+  const [adGroups, setAdGroups] = useState([])
+  const [groupsLoading, setGroupsLoading] = useState(false)
+  const [groupSearch, setGroupSearch] = useState('')
+  const [expandedGroup, setExpandedGroup] = useState(null)
+
+  // ── OUs ──
+  const [ous, setOus] = useState([])
+  const [ousLoading, setOusLoading] = useState(false)
+  const [ouSearch, setOuSearch] = useState('')
+
+  // ── Computers ──
+  const [computers, setComputers] = useState([])
+  const [computersLoading, setComputersLoading] = useState(false)
+  const [computerSearch, setComputerSearch] = useState('')
+  const [computerFilter, setComputerFilter] = useState('All')
+
+  // ── Domain Controllers ──
+  const [dcs, setDcs] = useState([])
+  const [dcsLoading, setDcsLoading] = useState(false)
 
   useEffect(() => {
     fetchConnectionStatus()
@@ -162,6 +181,49 @@ const ADScanner = () => {
     } catch (err) { console.error('Failed to fetch roles:', err) }
   }
 
+  const fetchAdGroups = async () => {
+    setGroupsLoading(true)
+    try {
+      const { data } = await api.get('/ad-scanner/groups')
+      setAdGroups(data.groups || [])
+    } catch (err) { console.error('Failed to fetch AD groups:', err) }
+    finally { setGroupsLoading(false) }
+  }
+
+  const fetchOus = async () => {
+    setOusLoading(true)
+    try {
+      const { data } = await api.get('/ad-scanner/ous')
+      setOus(data.ous || [])
+    } catch (err) { console.error('Failed to fetch OUs:', err) }
+    finally { setOusLoading(false) }
+  }
+
+  const fetchComputers = async () => {
+    setComputersLoading(true)
+    try {
+      const { data } = await api.get('/ad-scanner/computers')
+      setComputers(data.computers || [])
+    } catch (err) { console.error('Failed to fetch computers:', err) }
+    finally { setComputersLoading(false) }
+  }
+
+  const fetchDcs = async () => {
+    setDcsLoading(true)
+    try {
+      const { data } = await api.get('/ad-scanner/domain-controllers')
+      setDcs(data.dcs || [])
+    } catch (err) { console.error('Failed to fetch DCs:', err) }
+    finally { setDcsLoading(false) }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'groups') fetchAdGroups()
+    if (activeTab === 'ous') fetchOus()
+    if (activeTab === 'computers') fetchComputers()
+    if (activeTab === 'dcs') fetchDcs()
+  }, [activeTab]) // eslint-disable-line
+
   const handleRunScan = async () => {
     setScanning(true)
     setSyncResult(null)
@@ -221,6 +283,10 @@ const ADScanner = () => {
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'users', label: 'AD Users' },
+    { id: 'groups', label: 'AD Groups' },
+    { id: 'ous', label: 'Org Units' },
+    { id: 'computers', label: 'Computers' },
+    { id: 'dcs', label: 'Domain Controllers' },
     { id: 'risks', label: 'Risk Analysis' },
     { id: 'mappings', label: 'Role Mappings' },
     { id: 'history', label: 'Scan History' },
@@ -591,7 +657,7 @@ const ADScanner = () => {
       </div>
 
       {/* Tab Content */}
-      {!scan && activeTab !== 'mappings' && (
+      {!scan && !['mappings','groups','ous','computers','dcs'].includes(activeTab) && (
         <div className="bg-white rounded-lg shadow-md p-12 text-center">
           <Shield className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-gray-700 mb-2">No Scan Data Available</h3>
@@ -805,6 +871,411 @@ const ADScanner = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ─── AD Groups Tab ─── */}
+      {activeTab === 'groups' && (
+        <div className="space-y-4">
+          {groupsLoading ? (
+            <div className="bg-white rounded-lg shadow-md p-12 flex items-center justify-center gap-3">
+              <RefreshCw className="w-6 h-6 text-blue-500 animate-spin" />
+              <span className="text-gray-600 font-medium">Fetching groups from Active Directory...</span>
+            </div>
+          ) : (
+            <>
+              {/* Search + refresh bar */}
+              <div className="bg-white rounded-lg shadow-md p-4 flex flex-col md:flex-row gap-4 items-center">
+                <div className="flex-1 relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search groups by name or description..."
+                    value={groupSearch}
+                    onChange={e => setGroupSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <button
+                  onClick={fetchAdGroups}
+                  disabled={groupsLoading}
+                  className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4" /> Refresh
+                </button>
+              </div>
+
+              {/* Groups table */}
+              <div className="bg-white rounded-lg shadow-md overflow-hidden">
+                <div className="px-6 py-4 border-b flex items-center justify-between">
+                  <h2 className="text-lg font-bold text-gray-800">Active Directory Groups</h2>
+                  <span className="text-sm text-gray-500">
+                    {adGroups.filter(g =>
+                      !groupSearch ||
+                      g.name.toLowerCase().includes(groupSearch.toLowerCase()) ||
+                      g.description?.toLowerCase().includes(groupSearch.toLowerCase())
+                    ).length} groups
+                  </span>
+                </div>
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Group Name</th>
+                      <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Type</th>
+                      <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Scope</th>
+                      <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Members</th>
+                      <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Description</th>
+                      <th className="w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {adGroups
+                      .filter(g =>
+                        !groupSearch ||
+                        g.name.toLowerCase().includes(groupSearch.toLowerCase()) ||
+                        g.description?.toLowerCase().includes(groupSearch.toLowerCase())
+                      )
+                      .map((group, idx) => (
+                        <React.Fragment key={idx}>
+                          <tr
+                            className="hover:bg-gray-50 cursor-pointer"
+                            onClick={() => setExpandedGroup(expandedGroup === idx ? null : idx)}
+                          >
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                                  <Users className="w-4 h-4 text-indigo-600" />
+                                </div>
+                                <div>
+                                  <p className="font-medium text-gray-900">{group.name}</p>
+                                  {group.sam_account_name && group.sam_account_name !== group.name && (
+                                    <p className="text-xs text-gray-400">{group.sam_account_name}</p>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                group.type === 'Security' ? 'bg-red-100 text-red-700' :
+                                group.type === 'Distribution' ? 'bg-blue-100 text-blue-700' :
+                                'bg-gray-100 text-gray-600'
+                              }`}>{group.type}</span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                group.scope === 'Global' ? 'bg-green-100 text-green-700' :
+                                group.scope === 'Universal' ? 'bg-purple-100 text-purple-700' :
+                                group.scope === 'Domain Local' ? 'bg-orange-100 text-orange-700' :
+                                'bg-gray-100 text-gray-600'
+                              }`}>{group.scope}</span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="inline-flex items-center gap-1 text-sm font-semibold text-gray-800">
+                                <Users className="w-3 h-3 text-gray-400" />
+                                {group.member_count}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-500 max-w-xs">
+                              <span className="line-clamp-1">
+                                {group.description || <span className="italic text-gray-300">No description</span>}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              {expandedGroup === idx
+                                ? <ChevronUp className="w-4 h-4 text-gray-400" />
+                                : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                            </td>
+                          </tr>
+                          {expandedGroup === idx && (
+                            <tr>
+                              <td colSpan={6} className="bg-indigo-50 px-8 py-4">
+                                <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Members ({group.members.length})</p>
+                                {group.members.length > 0 ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {group.members.map((m, mi) => (
+                                      <span key={mi} className="px-3 py-1 text-xs font-medium bg-white border border-indigo-200 text-indigo-800 rounded-full">
+                                        {m}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-gray-400 italic">No members</p>
+                                )}
+                                <p className="text-xs text-gray-400 mt-3 font-mono truncate">{group.dn}</p>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      ))}
+                  </tbody>
+                </table>
+                {adGroups.length === 0 && !groupsLoading && (
+                  <div className="p-12 text-center">
+                    <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                    <p className="text-gray-500 font-medium">No groups found</p>
+                    <p className="text-gray-400 text-sm mt-1">Connect to AD and click Refresh to load groups</p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ─── Organizational Units Tab ─── */}
+      {activeTab === 'ous' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-lg shadow-md p-4 flex flex-col md:flex-row gap-4 items-center">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input type="text" placeholder="Search OUs by name or path..."
+                value={ouSearch} onChange={e => setOuSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <button onClick={fetchOus} disabled={ousLoading}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors">
+              <RefreshCw className={`w-4 h-4 ${ousLoading ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md overflow-hidden">
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">Organizational Units</h2>
+                <p className="text-sm text-gray-500 mt-0.5">Containers used to organise domain objects by department or function</p>
+              </div>
+              <span className="text-sm text-gray-500">{ous.filter(o => !ouSearch || o.name.toLowerCase().includes(ouSearch.toLowerCase()) || o.path.toLowerCase().includes(ouSearch.toLowerCase())).length} OUs</span>
+            </div>
+            {ousLoading ? (
+              <div className="p-12 flex items-center justify-center gap-3">
+                <RefreshCw className="w-6 h-6 text-blue-500 animate-spin" />
+                <span className="text-gray-600">Loading organizational units...</span>
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">OU Name</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Path</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Description</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Managed By</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Created</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {ous
+                    .filter(o => !ouSearch || o.name.toLowerCase().includes(ouSearch.toLowerCase()) || o.path.toLowerCase().includes(ouSearch.toLowerCase()))
+                    .map((ou, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-yellow-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <span className="text-yellow-600 font-bold text-xs">OU</span>
+                            </div>
+                            <span className="font-medium text-gray-900">{ou.name}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-600 font-mono">{ou.path || '—'}</td>
+                        <td className="py-3 px-4 text-sm text-gray-500">{ou.description || <span className="italic text-gray-300">None</span>}</td>
+                        <td className="py-3 px-4 text-sm text-gray-600">{ou.managed_by || <span className="italic text-gray-300">None</span>}</td>
+                        <td className="py-3 px-4 text-sm text-gray-500">{ou.created ? ou.created.replace('T', ' ') : '—'}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            )}
+            {!ousLoading && ous.length === 0 && (
+              <div className="p-12 text-center">
+                <div className="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center mx-auto mb-3">
+                  <span className="text-yellow-600 font-bold">OU</span>
+                </div>
+                <p className="text-gray-500 font-medium">No OUs found</p>
+                <p className="text-gray-400 text-sm mt-1">Your domain has no custom Organizational Units — all objects are in the default CN=Users/CN=Computers containers</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Computers Tab ─── */}
+      {activeTab === 'computers' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-lg shadow-md p-4 flex flex-col md:flex-row gap-4 items-center">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input type="text" placeholder="Search by name, hostname, or OS..."
+                value={computerSearch} onChange={e => setComputerSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <select value={computerFilter} onChange={e => setComputerFilter(e.target.value)}
+              className="px-4 py-2.5 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="All">All Status</option>
+              <option value="Enabled">Enabled</option>
+              <option value="Disabled">Disabled</option>
+            </select>
+            <button onClick={fetchComputers} disabled={computersLoading}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors">
+              <RefreshCw className={`w-4 h-4 ${computersLoading ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md overflow-hidden">
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">Domain Computers</h2>
+                <p className="text-sm text-gray-500 mt-0.5">All workstations and servers joined to the domain</p>
+              </div>
+              <span className="text-sm text-gray-500">
+                {computers.filter(c => {
+                  const matchSearch = !computerSearch || c.name.toLowerCase().includes(computerSearch.toLowerCase()) || c.dns_hostname.toLowerCase().includes(computerSearch.toLowerCase()) || c.os.toLowerCase().includes(computerSearch.toLowerCase())
+                  const matchFilter = computerFilter === 'All' || (computerFilter === 'Enabled' ? c.enabled : !c.enabled)
+                  return matchSearch && matchFilter
+                }).length} computers
+              </span>
+            </div>
+            {computersLoading ? (
+              <div className="p-12 flex items-center justify-center gap-3">
+                <RefreshCw className="w-6 h-6 text-blue-500 animate-spin" />
+                <span className="text-gray-600">Loading domain computers...</span>
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Computer</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Operating System</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Last Seen</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {computers
+                    .filter(c => {
+                      const matchSearch = !computerSearch || c.name.toLowerCase().includes(computerSearch.toLowerCase()) || c.dns_hostname.toLowerCase().includes(computerSearch.toLowerCase()) || c.os.toLowerCase().includes(computerSearch.toLowerCase())
+                      const matchFilter = computerFilter === 'All' || (computerFilter === 'Enabled' ? c.enabled : !c.enabled)
+                      return matchSearch && matchFilter
+                    })
+                    .map((c, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                              c.enabled ? 'bg-blue-100' : 'bg-gray-100'
+                            }`}>
+                              <Server className={`w-4 h-4 ${c.enabled ? 'text-blue-600' : 'text-gray-400'}`} />
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-900">{c.name}</p>
+                              {c.dns_hostname && <p className="text-xs text-gray-400">{c.dns_hostname}</p>}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <p className="text-sm text-gray-800">{c.os}</p>
+                          {c.os_version && <p className="text-xs text-gray-400">{c.os_version}</p>}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                            c.enabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>{c.enabled ? 'Active' : 'Disabled'}</span>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-600">{c.last_logon || 'Never'}</td>
+                        <td className="py-3 px-4 text-sm text-gray-500">{c.description || <span className="italic text-gray-300">None</span>}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            )}
+            {!computersLoading && computers.length === 0 && (
+              <div className="p-12 text-center">
+                <Server className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-gray-500 font-medium">No computers found</p>
+                <p className="text-gray-400 text-sm mt-1">No domain-joined computers detected. Make sure your Win11 VM is joined and click Refresh.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Domain Controllers Tab ─── */}
+      {activeTab === 'dcs' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-lg shadow-md p-4 flex justify-between items-center">
+            <p className="text-sm text-gray-600">Domain Controllers are the servers that host and manage your Active Directory domain.</p>
+            <button onClick={fetchDcs} disabled={dcsLoading}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors">
+              <RefreshCw className={`w-4 h-4 ${dcsLoading ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md overflow-hidden">
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">Domain Controllers</h2>
+                <p className="text-sm text-gray-500 mt-0.5">Servers running Active Directory Domain Services (AD DS)</p>
+              </div>
+              <span className="text-sm text-gray-500">{dcs.length} DC{dcs.length !== 1 ? 's' : ''}</span>
+            </div>
+            {dcsLoading ? (
+              <div className="p-12 flex items-center justify-center gap-3">
+                <RefreshCw className="w-6 h-6 text-blue-500 animate-spin" />
+                <span className="text-gray-600">Loading domain controllers...</span>
+              </div>
+            ) : dcs.length === 0 ? (
+              <div className="p-12 text-center">
+                <Shield className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-gray-500 font-medium">No domain controllers found</p>
+                <p className="text-gray-400 text-sm mt-1">Click Refresh to query Active Directory</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-200">
+                {dcs.map((dc, idx) => (
+                  <div key={idx} className="p-6 hover:bg-gray-50">
+                    <div className="flex items-start gap-4">
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                        dc.enabled ? 'bg-green-100' : 'bg-red-100'
+                      }`}>
+                        <Shield className={`w-6 h-6 ${dc.enabled ? 'text-green-600' : 'text-red-500'}`} />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <h3 className="font-bold text-gray-900 text-lg">{dc.name}</h3>
+                          <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                            dc.enabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>{dc.enabled ? 'Online' : 'Disabled'}</span>
+                          {dc.is_global_catalog && (
+                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">Global Catalog</span>
+                          )}
+                        </div>
+                        {dc.dns_hostname && <p className="text-sm text-blue-600 mt-0.5">{dc.dns_hostname}</p>}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 text-sm">
+                          <div>
+                            <p className="text-gray-500">Operating System</p>
+                            <p className="font-medium text-gray-800">{dc.os}</p>
+                            {dc.os_version && <p className="text-xs text-gray-400">{dc.os_version}</p>}
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Last Logon</p>
+                            <p className="font-medium text-gray-800">{dc.last_logon || 'Unknown'}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Created</p>
+                            <p className="font-medium text-gray-800">{dc.created ? dc.created.replace('T', ' ') : '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Description</p>
+                            <p className="font-medium text-gray-800">{dc.description || <span className="text-gray-400 italic">None</span>}</p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 font-mono mt-2 truncate">{dc.dn}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

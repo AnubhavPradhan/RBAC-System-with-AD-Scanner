@@ -478,3 +478,470 @@ def sync_ad_roles(current_user: User = Depends(get_current_user), db: Session = 
         "updated": updated,
         "skipped": skipped,
     }
+
+
+# ──────────────────────────────────────────
+# 7. Fetch AD Groups live from LDAP
+# ──────────────────────────────────────────
+@router.get("/groups")
+def list_ad_groups(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Fetch all security/distribution groups directly from AD via LDAP.
+    Falls back to groups extracted from the last scan if LDAP is unavailable.
+    """
+    cfg = db.query(ADConnectionConfig).first()
+
+    if cfg and cfg.is_connected:
+        try:
+            from ldap3 import Server, Connection, ALL, SUBTREE, Tls
+            import ssl as ssl_mod
+
+            tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
+            server = Server(
+                cfg.server, port=cfg.port, use_ssl=cfg.use_ssl,
+                tls=tls_config, get_info=ALL, connect_timeout=10,
+            )
+            conn = Connection(
+                server, user=cfg.bind_user, password=cfg.bind_password,
+                auto_bind=True, receive_timeout=15,
+            )
+
+            conn.search(
+                search_base=cfg.base_dn,
+                search_filter="(objectClass=group)",
+                search_scope=SUBTREE,
+                attributes=["cn", "description", "member", "groupType", "distinguishedName", "sAMAccountName"],
+            )
+
+            groups = []
+            for entry in conn.entries:
+                try:
+                    gtype_val = int(str(entry.groupType)) if entry.groupType else 0
+                except (ValueError, TypeError):
+                    gtype_val = 0
+
+                is_security = bool(gtype_val & 0x80000000) if gtype_val >= 0 else True
+                if gtype_val & 0x00000004:
+                    scope = "Universal"
+                elif gtype_val & 0x00000002:
+                    scope = "Global"
+                else:
+                    scope = "Domain Local"
+
+                members = []
+                if entry.member:
+                    for m in entry.member:
+                        dn_str = str(m)
+                        cn_part = dn_str.split(",")[0]
+                        cn_part = cn_part[3:] if cn_part.upper().startswith("CN=") else cn_part
+                        members.append(cn_part)
+
+                groups.append({
+                    "name": str(entry.cn),
+                    "description": str(entry.description) if entry.description and str(entry.description) != "[]" else "",
+                    "dn": str(entry.distinguishedName),
+                    "sam_account_name": str(entry.sAMAccountName) if entry.sAMAccountName else "",
+                    "member_count": len(members),
+                    "members": members[:100],
+                    "type": "Security" if is_security else "Distribution",
+                    "scope": scope,
+                    "source": "ldap",
+                })
+
+            conn.unbind()
+            groups.sort(key=lambda g: g["name"].lower())
+            return {"groups": groups, "source": "ldap", "total": len(groups)}
+
+        except Exception as e:
+            # Fall through to scan-based fallback
+            pass
+
+    # Fallback: extract groups from the last scan's member_of data
+    scan = db.query(ADScanResult).order_by(ADScanResult.id.desc()).first()
+    if not scan:
+        return {"groups": [], "source": "none", "total": 0}
+
+    ad_users = db.query(ADUser).filter(ADUser.scan_id == scan.id).all()
+    group_map: dict = {}
+    for u in ad_users:
+        for g in (json.loads(u.member_of) if u.member_of else []):
+            group_map.setdefault(g, []).append(u.display_name or u.sam_account_name)
+
+    groups = [
+        {
+            "name": name,
+            "description": "",
+            "dn": f"CN={name},CN=Users,{cfg.base_dn if cfg else ''}",
+            "sam_account_name": name,
+            "member_count": len(members),
+            "members": members,
+            "type": "Security",
+            "scope": "Unknown",
+            "source": "scan",
+        }
+        for name, members in sorted(group_map.items())
+    ]
+    return {"groups": groups, "source": "scan", "total": len(groups)}
+
+
+# ──────────────────────────────────────────
+# 8. RBAC → AD Sync: Push RBAC users into AD
+# ──────────────────────────────────────────
+@router.post("/sync-rbac-to-ad")
+def sync_rbac_to_ad(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    For each RBAC user (that was NOT created by AD sync), create or update
+    them in Active Directory and assign them to the correct AD group based
+    on the role → group mappings (reverse of AD→RBAC).
+    """
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+
+    # Get AD connection config
+    cfg = db.query(ADConnectionConfig).first()
+    if not cfg or not cfg.is_connected:
+        raise HTTPException(400, "No AD connection configured. Connect to AD first.")
+
+    # Build reverse mapping: RBAC role → AD group (use first match per role)
+    mappings = db.query(ADGroupMapping).all()
+    if not mappings:
+        raise HTTPException(400, "No AD group → RBAC role mappings configured.")
+
+    # Reverse: role → best AD group to place user in
+    role_to_group: dict = {}
+    # Priority: prefer non-admin groups for lower roles, use first mapping found
+    for m in mappings:
+        if m.rbac_role not in role_to_group:
+            role_to_group[m.rbac_role] = m.ad_group
+
+    # Get all RBAC users excluding system/seed users (those without a username or @ad.local suffix indicates AD-synced)
+    rbac_users = db.query(User).filter(
+        User.status == "Active",
+        User.id != current_user.id,
+    ).all()
+
+    created = 0
+    updated = 0
+    skipped = 0
+    errors = []
+
+    try:
+        from ldap3 import Server, Connection, ALL, SUBTREE, Tls, MODIFY_REPLACE
+        import ssl as ssl_mod
+
+        tls_config = None
+        if cfg.use_ssl:
+            tls_config = Tls(validate=ssl_mod.CERT_NONE)
+
+        server = Server(
+            cfg.server, port=cfg.port, use_ssl=cfg.use_ssl,
+            tls=tls_config, get_info=ALL, connect_timeout=10,
+        )
+        conn = Connection(
+            server, user=cfg.bind_user, password=cfg.bind_password,
+            auto_bind=True, receive_timeout=15,
+        )
+
+        for rbac_user in rbac_users:
+            sam = rbac_user.username or rbac_user.email.split("@")[0]
+            # Sanitize: AD sAMAccountName max 20 chars, no spaces
+            sam = sam.replace(" ", ".").replace("@", "").strip()[:20]
+
+            target_group = role_to_group.get(rbac_user.role)
+            if not target_group:
+                skipped += 1
+                continue
+
+            # Get group DN
+            conn.search(
+                search_base=cfg.base_dn,
+                search_filter=f"(&(objectClass=group)(cn={target_group}))",
+                search_scope=SUBTREE,
+                attributes=["distinguishedName"],
+            )
+            if not conn.entries:
+                errors.append(f"Group '{target_group}' not found in AD")
+                skipped += 1
+                continue
+            group_dn = str(conn.entries[0].distinguishedName)
+
+            # Check if user already exists in AD
+            conn.search(
+                search_base=cfg.base_dn,
+                search_filter=f"(&(objectClass=user)(sAMAccountName={sam}))",
+                search_scope=SUBTREE,
+                attributes=["distinguishedName", "memberOf"],
+            )
+
+            if conn.entries:
+                # User exists — ensure they're in the correct group
+                user_dn = str(conn.entries[0].distinguishedName)
+                member_of = [str(g) for g in conn.entries[0].memberOf] if conn.entries[0].memberOf else []
+                if group_dn not in member_of:
+                    conn.modify(group_dn, {"member": [(MODIFY_REPLACE, [user_dn] + [m for m in member_of if m != group_dn])]})
+                    # Use add member instead
+                    from ldap3 import MODIFY_ADD
+                    conn.modify(group_dn, {"member": [(MODIFY_ADD, [user_dn])]})
+                    updated += 1
+                else:
+                    skipped += 1
+            else:
+                # Create new AD user
+                display_name = rbac_user.name
+                first_name = rbac_user.name.split(" ")[0]
+                last_name = " ".join(rbac_user.name.split(" ")[1:]) if len(rbac_user.name.split(" ")) > 1 else ""
+                email = rbac_user.email if "@" in rbac_user.email and "ad.local" not in rbac_user.email else f"{sam}@{cfg.domain or 'mylab.local'}"
+
+                user_dn = f"CN={display_name},CN=Users,{cfg.base_dn}"
+
+                # Unicode password for AD (must be quoted and UTF-16LE encoded)
+                default_password = '"RBACSync_ChangeMe1!"'
+                encoded_password = default_password.encode("utf-16-le")
+
+                attributes = {
+                    "objectClass": ["top", "person", "organizationalPerson", "user"],
+                    "cn": display_name,
+                    "sAMAccountName": sam,
+                    "userPrincipalName": f"{sam}@{cfg.domain or 'mylab.local'}",
+                    "displayName": display_name,
+                    "givenName": first_name,
+                    "mail": email,
+                    "description": f"Created by RBAC system (role: {rbac_user.role})",
+                    "userAccountControl": 512,  # Normal account, enabled
+                }
+                if last_name:
+                    attributes["sn"] = last_name
+
+                success = conn.add(user_dn, attributes=attributes)
+                if not success:
+                    errors.append(f"Failed to create '{sam}': {conn.result.get('description', 'Unknown error')}")
+                    skipped += 1
+                    continue
+
+                # Set password
+                conn.modify(user_dn, {"unicodePwd": [(MODIFY_REPLACE, [encoded_password])]})
+
+                # Add to target group
+                from ldap3 import MODIFY_ADD
+                conn.modify(group_dn, {"member": [(MODIFY_ADD, [user_dn])]})
+
+                created += 1
+
+        conn.unbind()
+
+    except Exception as e:
+        raise HTTPException(500, f"AD sync failed: {str(e)}")
+
+    db.add(AuditLog(
+        user_email=current_user.email, action="RBAC → AD Sync", resource="AD Scanner",
+        details=f"Synced RBAC → AD: {created} created, {updated} updated, {skipped} skipped"
+                + (f", {len(errors)} errors" if errors else ""),
+        severity="Info" if not errors else "Warning",
+    ))
+    db.commit()
+
+    return {
+        "message": "RBAC → AD sync completed",
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+# ──────────────────────────────────────────
+# 9. Fetch Organizational Units from LDAP
+# ──────────────────────────────────────────
+@router.get("/ous")
+def list_ous(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cfg = db.query(ADConnectionConfig).first()
+    if not cfg or not cfg.is_connected:
+        return {"ous": [], "source": "none", "total": 0}
+
+    try:
+        from ldap3 import Server, Connection, ALL, SUBTREE, Tls
+        import ssl as ssl_mod
+
+        tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
+        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, receive_timeout=15)
+
+        conn.search(
+            search_base=cfg.base_dn,
+            search_filter="(objectClass=organizationalUnit)",
+            search_scope=SUBTREE,
+            attributes=["ou", "description", "distinguishedName", "whenCreated", "managedBy"],
+        )
+
+        ous = []
+        for entry in conn.entries:
+            dn = str(entry.distinguishedName)
+            # Build a readable path from the DN (strip the OU= prefix parts)
+            parts = [p.strip() for p in dn.split(",")]
+            ou_parts = [p[3:] for p in parts if p.upper().startswith("OU=")]
+            path = " / ".join(reversed(ou_parts))
+
+            desc = str(entry.description) if entry.description and str(entry.description) not in ["", "[]"] else ""
+            created = str(entry.whenCreated)[:19] if entry.whenCreated and str(entry.whenCreated) != "[]" else ""
+            managed_by = str(entry.managedBy) if entry.managedBy and str(entry.managedBy) != "[]" else ""
+            if managed_by:
+                cn_part = managed_by.split(",")[0]
+                managed_by = cn_part[3:] if cn_part.upper().startswith("CN=") else cn_part
+
+            ous.append({
+                "name": str(entry.ou) if entry.ou else ou_parts[0] if ou_parts else dn,
+                "path": path,
+                "dn": dn,
+                "description": desc,
+                "created": created,
+                "managed_by": managed_by,
+            })
+
+        conn.unbind()
+        ous.sort(key=lambda o: o["path"].lower())
+        return {"ous": ous, "source": "ldap", "total": len(ous)}
+
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch OUs: {str(e)}")
+
+
+# ──────────────────────────────────────────
+# 10. Fetch Computers from LDAP
+# ──────────────────────────────────────────
+@router.get("/computers")
+def list_computers(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cfg = db.query(ADConnectionConfig).first()
+    if not cfg or not cfg.is_connected:
+        return {"computers": [], "source": "none", "total": 0}
+
+    try:
+        from ldap3 import Server, Connection, ALL, SUBTREE, Tls
+        import ssl as ssl_mod
+
+        tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
+        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, receive_timeout=15)
+
+        conn.search(
+            search_base=cfg.base_dn,
+            search_filter="(&(objectClass=computer)(!(primaryGroupID=516)))",
+            search_scope=SUBTREE,
+            attributes=[
+                "cn", "distinguishedName", "operatingSystem", "operatingSystemVersion",
+                "description", "userAccountControl", "lastLogonTimestamp", "whenCreated",
+                "dNSHostName", "memberOf",
+            ],
+        )
+
+        computers = []
+        for entry in conn.entries:
+            try:
+                uac = int(str(entry.userAccountControl)) if entry.userAccountControl else 0
+            except (ValueError, TypeError):
+                uac = 0
+            enabled = not bool(uac & 0x2)
+
+            last_logon = ""
+            if entry.lastLogonTimestamp and str(entry.lastLogonTimestamp) not in ["", "[]"]:
+                try:
+                    from datetime import datetime, timezone, timedelta
+                    # lastLogonTimestamp is Windows FILETIME (100-ns intervals since 1601-01-01)
+                    val = int(str(entry.lastLogonTimestamp))
+                    if val > 0:
+                        epoch = datetime(1601, 1, 1, tzinfo=timezone.utc)
+                        dt = epoch + timedelta(microseconds=val // 10)
+                        last_logon = dt.strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    last_logon = str(entry.lastLogonTimestamp)[:19]
+
+            created = str(entry.whenCreated)[:19] if entry.whenCreated and str(entry.whenCreated) != "[]" else ""
+
+            computers.append({
+                "name": str(entry.cn),
+                "dns_hostname": str(entry.dNSHostName) if entry.dNSHostName and str(entry.dNSHostName) != "[]" else "",
+                "dn": str(entry.distinguishedName),
+                "os": str(entry.operatingSystem) if entry.operatingSystem and str(entry.operatingSystem) != "[]" else "Unknown",
+                "os_version": str(entry.operatingSystemVersion) if entry.operatingSystemVersion and str(entry.operatingSystemVersion) != "[]" else "",
+                "description": str(entry.description) if entry.description and str(entry.description) != "[]" else "",
+                "enabled": enabled,
+                "last_logon": last_logon,
+                "created": created,
+            })
+
+        conn.unbind()
+        computers.sort(key=lambda c: c["name"].lower())
+        return {"computers": computers, "source": "ldap", "total": len(computers)}
+
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch computers: {str(e)}")
+
+
+# ──────────────────────────────────────────
+# 11. Fetch Domain Controllers from LDAP
+# ──────────────────────────────────────────
+@router.get("/domain-controllers")
+def list_domain_controllers(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cfg = db.query(ADConnectionConfig).first()
+    if not cfg or not cfg.is_connected:
+        return {"dcs": [], "source": "none", "total": 0}
+
+    try:
+        from ldap3 import Server, Connection, ALL, SUBTREE, Tls
+        import ssl as ssl_mod
+
+        tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
+        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, receive_timeout=15)
+
+        # primaryGroupID=516 means Domain Controllers
+        conn.search(
+            search_base=cfg.base_dn,
+            search_filter="(&(objectClass=computer)(primaryGroupID=516))",
+            search_scope=SUBTREE,
+            attributes=[
+                "cn", "distinguishedName", "operatingSystem", "operatingSystemVersion",
+                "description", "userAccountControl", "lastLogonTimestamp", "whenCreated",
+                "dNSHostName", "serverReferenceBL",
+            ],
+        )
+
+        dcs = []
+        for entry in conn.entries:
+            try:
+                uac = int(str(entry.userAccountControl)) if entry.userAccountControl else 0
+            except (ValueError, TypeError):
+                uac = 0
+
+            last_logon = ""
+            if entry.lastLogonTimestamp and str(entry.lastLogonTimestamp) not in ["", "[]"]:
+                try:
+                    from datetime import datetime, timezone, timedelta
+                    val = int(str(entry.lastLogonTimestamp))
+                    if val > 0:
+                        epoch = datetime(1601, 1, 1, tzinfo=timezone.utc)
+                        dt = epoch + timedelta(microseconds=val // 10)
+                        last_logon = dt.strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    last_logon = str(entry.lastLogonTimestamp)[:19]
+
+            created = str(entry.whenCreated)[:19] if entry.whenCreated and str(entry.whenCreated) != "[]" else ""
+
+            dcs.append({
+                "name": str(entry.cn),
+                "dns_hostname": str(entry.dNSHostName) if entry.dNSHostName and str(entry.dNSHostName) != "[]" else "",
+                "dn": str(entry.distinguishedName),
+                "os": str(entry.operatingSystem) if entry.operatingSystem and str(entry.operatingSystem) != "[]" else "Unknown",
+                "os_version": str(entry.operatingSystemVersion) if entry.operatingSystemVersion and str(entry.operatingSystemVersion) != "[]" else "",
+                "description": str(entry.description) if entry.description and str(entry.description) != "[]" else "",
+                "enabled": not bool(uac & 0x2),
+                "last_logon": last_logon,
+                "created": created,
+                "is_global_catalog": bool(uac & 0x00080000),
+            })
+
+        conn.unbind()
+        dcs.sort(key=lambda d: d["name"].lower())
+        return {"dcs": dcs, "source": "ldap", "total": len(dcs)}
+
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch DCs: {str(e)}")
