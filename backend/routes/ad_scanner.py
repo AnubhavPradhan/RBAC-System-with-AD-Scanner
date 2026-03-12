@@ -1028,10 +1028,18 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
         if not ok:
             raise HTTPException(400, f"Failed to create user: {conn.result.get('description', conn.result)}")
 
-        # Set password
+        # Set password (requires LDAPS or StartTLS — AD rejects unicodePwd over plain LDAP)
         pwd_quoted = f'"{body.password}"'
         encoded_pwd = pwd_quoted.encode("utf-16-le")
-        conn.modify(user_dn, {"unicodePwd": [(MODIFY_REPLACE, [encoded_pwd])]})
+        pwd_ok = conn.modify(user_dn, {"unicodePwd": [(MODIFY_REPLACE, [encoded_pwd])]})
+        if not pwd_ok:
+            pwd_err = conn.result.get('description', conn.result)
+            # Clean up the user so we don't leave an account with no password
+            conn.delete(user_dn)
+            hint = ""
+            if not cfg.use_ssl:
+                hint = " Hint: Password changes require an encrypted connection (LDAPS on port 636 with SSL enabled)."
+            raise HTTPException(400, f"Failed to set password: {pwd_err}.{hint}")
 
         # Build UAC
         uac = 512  # NORMAL_ACCOUNT
@@ -1040,6 +1048,9 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
         if body.password_never_expires:
             uac |= 0x10000
         conn.modify(user_dn, {"userAccountControl": [(MODIFY_REPLACE, [str(uac)])]})
+
+        # Clear "User must change password at next logon" so the account can log in immediately
+        conn.modify(user_dn, {"pwdLastSet": [(MODIFY_REPLACE, ["-1"])]})
 
         conn.unbind()
         db.add(AuditLog(user_email=current_user.email, action="Create", resource="AD User",
