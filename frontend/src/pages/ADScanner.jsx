@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Shield, AlertTriangle, Users, UserX, Key, RefreshCw, ChevronDown, ChevronUp, Search, Server, Wifi, WifiOff, Plug, Unplug, Eye, EyeOff, XCircle, CheckCircle, Info, AlertCircle, X } from 'lucide-react'
+import { Shield, AlertTriangle, Users, UserX, Key, RefreshCw, ChevronDown, ChevronUp, Search, Server, Wifi, WifiOff, Plug, Unplug, Eye, EyeOff, XCircle, CheckCircle, Info, AlertCircle, X, Plus, Pencil, Trash2, UserPlus, UserMinus, Monitor } from 'lucide-react'
 import api from '../utils/api'
 
 const RISK_COLORS = {
@@ -78,6 +78,37 @@ const ADScanner = () => {
   const [computersLoading, setComputersLoading] = useState(false)
   const [computerSearch, setComputerSearch] = useState('')
   const [computerFilter, setComputerFilter] = useState('All')
+
+  // ── CRUD: User ──
+  const [showUserModal, setShowUserModal] = useState(false)
+  const [userModalMode, setUserModalMode] = useState('create')
+  const [userForm, setUserForm] = useState({ first_name: '', last_name: '', initials: '', full_name: '', sam_account_name: '', upn_suffix: '', password: '', description: '', enabled: true, password_never_expires: false, ou_dn: '' })
+  const [editingUserSam, setEditingUserSam] = useState(null)
+  const [showGroupAssignModal, setShowGroupAssignModal] = useState(false)
+  const [groupAssignUser, setGroupAssignUser] = useState(null)
+  const [groupAssignAction, setGroupAssignAction] = useState('add')
+  const [selectedGroupDn, setSelectedGroupDn] = useState('')
+
+  // ── CRUD: Group ──
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false)
+  const [createGroupForm, setCreateGroupForm] = useState({ name: '', scope: 'Global', group_type: 'Security', description: '', ou_dn: '' })
+  const [showEditGroupModal, setShowEditGroupModal] = useState(false)
+  const [editGroupForm, setEditGroupForm] = useState({ description: '' })
+  const [editGroupCn, setEditGroupCn] = useState('')
+
+  // ── CRUD: OU ──
+  const [showOuModal, setShowOuModal] = useState(false)
+  const [ouForm, setOuForm] = useState({ name: '', description: '', parent_dn: '' })
+  const [showEditOuModal, setShowEditOuModal] = useState(false)
+  const [editOuForm, setEditOuForm] = useState({ description: '' })
+  const [editOuDn, setEditOuDn] = useState('')
+
+  // ── CRUD: Computer ──
+  const [showComputerModal, setShowComputerModal] = useState(false)
+  const [computerForm, setComputerForm] = useState({ name: '', ou_dn: '', description: '' })
+  const [showEditComputerModal, setShowEditComputerModal] = useState(false)
+  const [editComputerForm, setEditComputerForm] = useState({ description: '', enabled: true })
+  const [editComputerCn, setEditComputerCn] = useState('')
 
   // ── Domain Controllers ──
   const [dcs, setDcs] = useState([])
@@ -266,11 +297,215 @@ const ADScanner = () => {
     } catch (err) { showNotification('error', 'Delete failed') }
   }
 
+  // ══════════════════════════════════════
+  // CRUD Handlers
+  // ══════════════════════════════════════
+
+  // ── User CRUD ──
+  const openCreateUser = () => {
+    setUserModalMode('create')
+    setUserForm({ first_name: '', last_name: '', initials: '', full_name: '', sam_account_name: '', upn_suffix: connection?.config?.domain || '', password: '', description: '', enabled: true, password_never_expires: false, ou_dn: '' })
+    setShowUserModal(true)
+  }
+
+  const openEditUser = (user) => {
+    setUserModalMode('edit')
+    setEditingUserSam(user.sam_account_name)
+    setUserForm({
+      first_name: user.display_name?.split(' ')[0] || '',
+      last_name: user.display_name?.split(' ').slice(1).join(' ') || '',
+      initials: '',
+      full_name: user.display_name || '',
+      sam_account_name: user.sam_account_name,
+      upn_suffix: '',
+      password: '',
+      description: user.description || '',
+      enabled: user.enabled,
+      password_never_expires: user.password_never_expires || false,
+      ou_dn: '',
+    })
+    setShowUserModal(true)
+  }
+
+  const handleSaveUser = async (e) => {
+    e.preventDefault()
+    try {
+      if (userModalMode === 'create') {
+        await api.post('/ad-scanner/users', userForm)
+        showNotification('success', `User '${userForm.sam_account_name}' created successfully`)
+      } else {
+        await api.put(`/ad-scanner/users/${editingUserSam}`, {
+          first_name: userForm.first_name || undefined,
+          last_name: userForm.last_name || undefined,
+          initials: userForm.initials || undefined,
+          display_name: userForm.full_name || undefined,
+          email: userForm.email || undefined,
+          description: userForm.description,
+          enabled: userForm.enabled,
+          password_never_expires: userForm.password_never_expires,
+        })
+        showNotification('success', `User '${editingUserSam}' updated successfully`)
+      }
+      setShowUserModal(false)
+      await handleRunScan()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Operation failed')
+    }
+  }
+
+  const handleDeleteUser = async (sam) => {
+    const confirmed = await showConfirm(`Delete user '${sam}' from Active Directory? This cannot be undone.`)
+    if (!confirmed) return
+    try {
+      await api.delete(`/ad-scanner/users/${sam}`)
+      showNotification('success', `User '${sam}' deleted`)
+      await handleRunScan()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Delete failed')
+    }
+  }
+
+  const openGroupAssign = (user, action) => {
+    setGroupAssignUser(user)
+    setGroupAssignAction(action)
+    setSelectedGroupDn('')
+    if (adGroups.length === 0) fetchAdGroups()
+    setShowGroupAssignModal(true)
+  }
+
+  const handleGroupAssign = async () => {
+    if (!selectedGroupDn || !groupAssignUser) return
+    try {
+      const endpoint = groupAssignAction === 'add' ? 'add-to-group' : 'remove-from-group'
+      await api.post(`/ad-scanner/users/${groupAssignUser.sam_account_name}/${endpoint}`, { group_dn: selectedGroupDn })
+      showNotification('success', `User ${groupAssignAction === 'add' ? 'added to' : 'removed from'} group`)
+      setShowGroupAssignModal(false)
+      await handleRunScan()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Failed')
+    }
+  }
+
+  // ── Group CRUD ──
+  const handleCreateGroup = async (e) => {
+    e.preventDefault()
+    try {
+      await api.post('/ad-scanner/groups/create', createGroupForm)
+      showNotification('success', `Group '${createGroupForm.name}' created`)
+      setShowCreateGroupModal(false)
+      setCreateGroupForm({ name: '', scope: 'Global', group_type: 'Security', description: '', ou_dn: '' })
+      await fetchAdGroups()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Create failed')
+    }
+  }
+
+  const handleUpdateGroup = async (e) => {
+    e.preventDefault()
+    try {
+      await api.put(`/ad-scanner/groups/${editGroupCn}`, { description: editGroupForm.description })
+      showNotification('success', `Group '${editGroupCn}' updated`)
+      setShowEditGroupModal(false)
+      await fetchAdGroups()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Update failed')
+    }
+  }
+
+  const handleDeleteGroup = async (cn) => {
+    const confirmed = await showConfirm(`Delete group '${cn}'? This cannot be undone.`)
+    if (!confirmed) return
+    try {
+      await api.delete(`/ad-scanner/groups/${cn}`)
+      showNotification('success', `Group '${cn}' deleted`)
+      await fetchAdGroups()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Delete failed')
+    }
+  }
+
+  // ── OU CRUD ──
+  const handleCreateOu = async (e) => {
+    e.preventDefault()
+    try {
+      await api.post('/ad-scanner/ous/create', ouForm)
+      showNotification('success', `OU '${ouForm.name}' created`)
+      setShowOuModal(false)
+      setOuForm({ name: '', description: '', parent_dn: '' })
+      await fetchOus()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Create failed')
+    }
+  }
+
+  const handleUpdateOu = async (e) => {
+    e.preventDefault()
+    try {
+      await api.put(`/ad-scanner/ous/update?dn=${encodeURIComponent(editOuDn)}&description=${encodeURIComponent(editOuForm.description)}`)
+      showNotification('success', 'OU updated')
+      setShowEditOuModal(false)
+      await fetchOus()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Update failed')
+    }
+  }
+
+  const handleDeleteOu = async (dn, name) => {
+    const confirmed = await showConfirm(`Delete OU '${name}'? It must be empty.`)
+    if (!confirmed) return
+    try {
+      await api.delete(`/ad-scanner/ous/delete?dn=${encodeURIComponent(dn)}`)
+      showNotification('success', `OU '${name}' deleted`)
+      await fetchOus()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Delete failed')
+    }
+  }
+
+  // ── Computer CRUD ──
+  const handleCreateComputer = async (e) => {
+    e.preventDefault()
+    try {
+      await api.post('/ad-scanner/computers/create', computerForm)
+      showNotification('success', `Computer '${computerForm.name}' created`)
+      setShowComputerModal(false)
+      setComputerForm({ name: '', ou_dn: '', description: '' })
+      await fetchComputers()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Create failed')
+    }
+  }
+
+  const handleUpdateComputer = async (e) => {
+    e.preventDefault()
+    try {
+      await api.put(`/ad-scanner/computers/${editComputerCn}`, editComputerForm)
+      showNotification('success', `Computer '${editComputerCn}' updated`)
+      setShowEditComputerModal(false)
+      await fetchComputers()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Update failed')
+    }
+  }
+
+  const handleDeleteComputer = async (cn) => {
+    const confirmed = await showConfirm(`Delete computer '${cn}'? This cannot be undone.`)
+    if (!confirmed) return
+    try {
+      await api.delete(`/ad-scanner/computers/${cn}`)
+      showNotification('success', `Computer '${cn}' deleted`)
+      await fetchComputers()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Delete failed')
+    }
+  }
+
   const scan = scanData?.scan
   const users = scanData?.users || []
   const riskBreakdown = scanData?.risk_breakdown || []
   const riskLevels = scanData?.risk_levels || {}
 
+  const SYSTEM_ACCOUNTS = ['guest', 'krbtgt']
   const filteredUsers = users.filter(u => {
     const matchesRisk = filterRisk === 'All' || u.risk_level === filterRisk
     const matchesSearch = !searchQuery ||
@@ -278,6 +513,12 @@ const ADScanner = () => {
       u.sam_account_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.email?.toLowerCase().includes(searchQuery.toLowerCase())
     return matchesRisk && matchesSearch
+  }).sort((a, b) => {
+    const aSystem = SYSTEM_ACCOUNTS.includes(a.sam_account_name?.toLowerCase())
+    const bSystem = SYSTEM_ACCOUNTS.includes(b.sam_account_name?.toLowerCase())
+    if (aSystem && !bSystem) return 1
+    if (!aSystem && bSystem) return -1
+    return 0
   })
 
   const tabs = [
@@ -751,6 +992,10 @@ const ADScanner = () => {
                 <option value="Medium">Medium</option>
                 <option value="Low">Low</option>
               </select>
+              <button onClick={openCreateUser}
+                className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-lg hover:bg-green-700 transition-colors">
+                <Plus className="w-4 h-4" /> Add User
+              </button>
             </div>
             <div className="mt-2 text-sm text-gray-500">
               Showing {filteredUsers.length} of {users.length} users
@@ -767,6 +1012,7 @@ const ADScanner = () => {
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Last Logon</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Risk</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Flags</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Actions</th>
                   <th className="w-10"></th>
                 </tr>
               </thead>
@@ -810,13 +1056,25 @@ const ADScanner = () => {
                       <td className="py-3 px-4">
                         <span className="text-sm text-gray-600">{user.risk_flags?.length || 0} flags</span>
                       </td>
+                      <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => openEditUser(user)} title="Edit user"
+                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleDeleteUser(user.sam_account_name)} title="Delete user"
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
                       <td className="py-3 px-4">
                         {expandedUser === idx ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
                       </td>
                     </tr>
                     {expandedUser === idx && (
                       <tr>
-                        <td colSpan={6} className="bg-gray-50 px-6 py-4">
+                        <td colSpan={7} className="bg-gray-50 px-6 py-4">
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                             <div>
                               <p className="text-gray-500">Email</p>
@@ -849,6 +1107,18 @@ const ADScanner = () => {
                                     {group}
                                   </span>
                                 ))}
+                              </div>
+                              <div className="flex gap-2 mt-2">
+                                <button onClick={() => openGroupAssign(user, 'add')}
+                                  className="flex items-center gap-1 text-xs px-3 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors">
+                                  <UserPlus className="w-3 h-3" /> Add to Group
+                                </button>
+                                {(user.member_of || []).length > 0 && (
+                                  <button onClick={() => openGroupAssign(user, 'remove')}
+                                    className="flex items-center gap-1 text-xs px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors">
+                                    <UserMinus className="w-3 h-3" /> Remove from Group
+                                  </button>
+                                )}
                               </div>
                             </div>
                             {user.risk_flags?.length > 0 && (
@@ -897,6 +1167,10 @@ const ADScanner = () => {
                     className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+                <button onClick={() => { setCreateGroupForm({ name: '', scope: 'Global', group_type: 'Security', description: '', ou_dn: '' }); setShowCreateGroupModal(true) }}
+                  className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-lg hover:bg-green-700 transition-colors">
+                  <Plus className="w-4 h-4" /> Add Group
+                </button>
                 <button
                   onClick={fetchAdGroups}
                   disabled={groupsLoading}
@@ -926,6 +1200,7 @@ const ADScanner = () => {
                       <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Scope</th>
                       <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Members</th>
                       <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Description</th>
+                      <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Actions</th>
                       <th className="w-10"></th>
                     </tr>
                   </thead>
@@ -981,6 +1256,18 @@ const ADScanner = () => {
                                 {group.description || <span className="italic text-gray-300">No description</span>}
                               </span>
                             </td>
+                            <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center gap-1">
+                                <button onClick={() => { setEditGroupCn(group.name); setEditGroupForm({ description: group.description || '' }); setShowEditGroupModal(true) }}
+                                  title="Edit group" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDeleteGroup(group.name)}
+                                  title="Delete group" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
                             <td className="py-3 px-4">
                               {expandedGroup === idx
                                 ? <ChevronUp className="w-4 h-4 text-gray-400" />
@@ -989,7 +1276,7 @@ const ADScanner = () => {
                           </tr>
                           {expandedGroup === idx && (
                             <tr>
-                              <td colSpan={6} className="bg-indigo-50 px-8 py-4">
+                              <td colSpan={7} className="bg-indigo-50 px-8 py-4">
                                 <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Members ({group.members.length})</p>
                                 {group.members.length > 0 ? (
                                   <div className="flex flex-wrap gap-2">
@@ -1033,6 +1320,10 @@ const ADScanner = () => {
                 value={ouSearch} onChange={e => setOuSearch(e.target.value)}
                 className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
+            <button onClick={() => { setOuForm({ name: '', description: '', parent_dn: '' }); setShowOuModal(true) }}
+              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-lg hover:bg-green-700 transition-colors">
+              <Plus className="w-4 h-4" /> Add OU
+            </button>
             <button onClick={fetchOus} disabled={ousLoading}
               className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors">
               <RefreshCw className={`w-4 h-4 ${ousLoading ? 'animate-spin' : ''}`} /> Refresh
@@ -1061,6 +1352,7 @@ const ADScanner = () => {
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Description</th>
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Managed By</th>
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Created</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -1080,6 +1372,18 @@ const ADScanner = () => {
                         <td className="py-3 px-4 text-sm text-gray-500">{ou.description || <span className="italic text-gray-300">None</span>}</td>
                         <td className="py-3 px-4 text-sm text-gray-600">{ou.managed_by || <span className="italic text-gray-300">None</span>}</td>
                         <td className="py-3 px-4 text-sm text-gray-500">{ou.created ? ou.created.replace('T', ' ') : '—'}</td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => { setEditOuDn(ou.dn); setEditOuForm({ description: ou.description || '' }); setShowEditOuModal(true) }}
+                              title="Edit OU" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => handleDeleteOu(ou.dn, ou.name)}
+                              title="Delete OU" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                 </tbody>
@@ -1114,6 +1418,10 @@ const ADScanner = () => {
               <option value="Enabled">Enabled</option>
               <option value="Disabled">Disabled</option>
             </select>
+            <button onClick={() => { setComputerForm({ name: '', ou_dn: '', description: '' }); setShowComputerModal(true) }}
+              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-lg hover:bg-green-700 transition-colors">
+              <Plus className="w-4 h-4" /> Add Computer
+            </button>
             <button onClick={fetchComputers} disabled={computersLoading}
               className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors">
               <RefreshCw className={`w-4 h-4 ${computersLoading ? 'animate-spin' : ''}`} /> Refresh
@@ -1148,6 +1456,7 @@ const ADScanner = () => {
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Last Seen</th>
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Description</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -1183,6 +1492,18 @@ const ADScanner = () => {
                         </td>
                         <td className="py-3 px-4 text-sm text-gray-600">{c.last_logon || 'Never'}</td>
                         <td className="py-3 px-4 text-sm text-gray-500">{c.description || <span className="italic text-gray-300">None</span>}</td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => { setEditComputerCn(c.name); setEditComputerForm({ description: c.description || '', enabled: c.enabled }); setShowEditComputerModal(true) }}
+                              title="Edit computer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => handleDeleteComputer(c.name)}
+                              title="Delete computer" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                 </tbody>
@@ -1510,6 +1831,354 @@ const ADScanner = () => {
           {scanHistory.length === 0 && (
             <p className="text-gray-500 text-center py-8">No scans performed yet</p>
           )}
+        </div>
+      )}
+
+      {/* ═══ Create / Edit User Modal ═══ */}
+      {showUserModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">{userModalMode === 'create' ? 'New User' : 'Edit User'}</h2>
+              <button onClick={() => setShowUserModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleSaveUser} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              {userModalMode === 'create' && (
+                <>
+                  <div className="grid grid-cols-5 gap-3">
+                    <div className="col-span-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">First name *</label>
+                      <input type="text" required value={userForm.first_name} onChange={e => setUserForm({...userForm, first_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                    <div className="col-span-1">
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Initials</label>
+                      <input type="text" value={userForm.initials} onChange={e => setUserForm({...userForm, initials: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Last name</label>
+                      <input type="text" value={userForm.last_name} onChange={e => setUserForm({...userForm, last_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Full name</label>
+                    <input type="text" value={userForm.full_name || `${userForm.first_name} ${userForm.last_name}`.trim()}
+                      onChange={e => setUserForm({...userForm, full_name: e.target.value})}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name *</label>
+                      <input type="text" required value={userForm.sam_account_name} onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">@domain</label>
+                      <input type="text" value={userForm.upn_suffix} onChange={e => setUserForm({...userForm, upn_suffix: e.target.value})}
+                        placeholder={connection?.config?.domain || 'mylab.local'}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Password *</label>
+                    <input type="password" required value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  </div>
+                </>
+              )}
+              {userModalMode === 'edit' && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">First name</label>
+                      <input type="text" value={userForm.first_name} onChange={e => setUserForm({...userForm, first_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Last name</label>
+                      <input type="text" value={userForm.last_name} onChange={e => setUserForm({...userForm, last_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Display name</label>
+                    <input type="text" value={userForm.full_name} onChange={e => setUserForm({...userForm, full_name: e.target.value})}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  </div>
+                </>
+              )}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={userForm.description} onChange={e => setUserForm({...userForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="flex items-center gap-6">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={userForm.enabled} onChange={e => setUserForm({...userForm, enabled: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                  <span className="text-sm font-medium text-gray-700">Account Enabled</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={userForm.password_never_expires} onChange={e => setUserForm({...userForm, password_never_expires: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                  <span className="text-sm font-medium text-gray-700">Password never expires</span>
+                </label>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowUserModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
+                  {userModalMode === 'create' ? 'Create User' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Group Assign/Remove Modal ═══ */}
+      {showGroupAssignModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className={`px-6 py-4 text-white ${groupAssignAction === 'add' ? 'bg-gradient-to-r from-green-600 to-emerald-600' : 'bg-gradient-to-r from-red-600 to-rose-600'}`}>
+              <h2 className="text-lg font-bold">{groupAssignAction === 'add' ? 'Add to Group' : 'Remove from Group'}</h2>
+              <p className="text-sm opacity-80">User: {groupAssignUser?.display_name}</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Select Group</label>
+                <select value={selectedGroupDn} onChange={e => setSelectedGroupDn(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                  <option value="">-- Select a group --</option>
+                  {(groupAssignAction === 'remove'
+                    ? adGroups.filter(g => (groupAssignUser?.member_of || []).includes(g.name))
+                    : adGroups
+                  ).map((g, i) => (
+                    <option key={i} value={g.dn}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button onClick={() => setShowGroupAssignModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button onClick={handleGroupAssign} disabled={!selectedGroupDn}
+                  className={`px-5 py-2 text-white rounded-lg font-medium disabled:opacity-50 ${groupAssignAction === 'add' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}>
+                  {groupAssignAction === 'add' ? 'Add to Group' : 'Remove from Group'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Create Group Modal ═══ */}
+      {showCreateGroupModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">New Group</h2>
+              <button onClick={() => setShowCreateGroupModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleCreateGroup} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Group name *</label>
+                <input type="text" required value={createGroupForm.name} onChange={e => setCreateGroupForm({...createGroupForm, name: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Group scope</label>
+                  <div className="space-y-1">
+                    {['DomainLocal', 'Global', 'Universal'].map(s => (
+                      <label key={s} className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="scope" value={s} checked={createGroupForm.scope === s}
+                          onChange={e => setCreateGroupForm({...createGroupForm, scope: e.target.value})}
+                          className="text-blue-600 focus:ring-blue-500" />
+                        <span className="text-sm text-gray-700">{s === 'DomainLocal' ? 'Domain local' : s}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Group type</label>
+                  <div className="space-y-1">
+                    {['Security', 'Distribution'].map(t => (
+                      <label key={t} className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="gtype" value={t} checked={createGroupForm.group_type === t}
+                          onChange={e => setCreateGroupForm({...createGroupForm, group_type: e.target.value})}
+                          className="text-blue-600 focus:ring-blue-500" />
+                        <span className="text-sm text-gray-700">{t}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={createGroupForm.description} onChange={e => setCreateGroupForm({...createGroupForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowCreateGroupModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium">Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Edit Group Modal ═══ */}
+      {showEditGroupModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-white">
+              <h2 className="text-lg font-bold">Edit Group: {editGroupCn}</h2>
+            </div>
+            <form onSubmit={handleUpdateGroup} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={editGroupForm.description} onChange={e => setEditGroupForm({...editGroupForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowEditGroupModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Create OU Modal ═══ */}
+      {showOuModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-yellow-500 to-orange-500 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">New Organizational Unit</h2>
+              <button onClick={() => setShowOuModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleCreateOu} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Name *</label>
+                <input type="text" required value={ouForm.name} onChange={e => setOuForm({...ouForm, name: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={ouForm.description} onChange={e => setOuForm({...ouForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Parent OU (optional)</label>
+                <select value={ouForm.parent_dn} onChange={e => setOuForm({...ouForm, parent_dn: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                  <option value="">Root (Domain)</option>
+                  {ous.map((o, i) => (
+                    <option key={i} value={o.dn}>{o.name} ({o.path})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowOuModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 font-medium">Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Edit OU Modal ═══ */}
+      {showEditOuModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-yellow-500 to-orange-500 px-6 py-4 text-white">
+              <h2 className="text-lg font-bold">Edit OU</h2>
+            </div>
+            <form onSubmit={handleUpdateOu} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={editOuForm.description} onChange={e => setEditOuForm({...editOuForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowEditOuModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 font-medium">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Create Computer Modal ═══ */}
+      {showComputerModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-cyan-600 to-blue-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">New Computer</h2>
+              <button onClick={() => setShowComputerModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleCreateComputer} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Computer name *</label>
+                <input type="text" required value={computerForm.name} onChange={e => setComputerForm({...computerForm, name: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Target OU (optional)</label>
+                <select value={computerForm.ou_dn} onChange={e => setComputerForm({...computerForm, ou_dn: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                  <option value="">Default (CN=Computers)</option>
+                  {ous.map((o, i) => (
+                    <option key={i} value={o.dn}>{o.name} ({o.path})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={computerForm.description} onChange={e => setComputerForm({...computerForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowComputerModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 font-medium">Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Edit Computer Modal ═══ */}
+      {showEditComputerModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-cyan-600 to-blue-600 px-6 py-4 text-white">
+              <h2 className="text-lg font-bold">Edit Computer: {editComputerCn}</h2>
+            </div>
+            <form onSubmit={handleUpdateComputer} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={editComputerForm.description} onChange={e => setEditComputerForm({...editComputerForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editComputerForm.enabled} onChange={e => setEditComputerForm({...editComputerForm, enabled: e.target.checked})}
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                  <span className="text-sm font-medium text-gray-700">Enabled</span>
+                </label>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowEditComputerModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 font-medium">Save</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
