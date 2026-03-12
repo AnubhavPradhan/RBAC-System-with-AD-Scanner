@@ -31,7 +31,7 @@ const Sidebar = () => {
   return (
     <aside className="w-64 bg-gray-800 text-white min-h-screen fixed top-0 left-0 flex flex-col">
       <div className="p-6 flex-1 overflow-y-auto">
-        <h1 className="text-2xl font-bold mb-8">RBAC & AD Scanner</h1>
+        <h1 className="text-xl font-bold mb-8">RBAC & AD Scanner</h1>
         <nav>
           <ul className="space-y-2">
             {visibleMenuItems.map((item) => (
