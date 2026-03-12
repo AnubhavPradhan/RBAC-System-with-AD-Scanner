@@ -46,6 +46,10 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
         logger.warning("[AD Scanner] No AD server or bind user configured. ad_server=%r, ad_bind_user=%r", ad_server, ad_bind_user)
         return None
 
+    if not ad_base_dn or not ad_base_dn.strip() or "=" not in ad_base_dn:
+        logger.error("[AD Scanner] Invalid or empty Base DN: %r  — set it to e.g. DC=mylab,DC=local", ad_base_dn)
+        raise ValueError(f"AD Base DN is missing or invalid: {ad_base_dn!r}. Set it to e.g. DC=mylab,DC=local in AD Scanner settings.")
+
     try:
         from ldap3 import Server, Connection, ALL, SUBTREE, Tls
         import ssl as ssl_mod
