@@ -29,6 +29,7 @@ const ADScanner = () => {
     server: '',
     port: 389,
     use_ssl: false,
+    use_start_tls: false,
     base_dn: '',
     bind_user: '',
     bind_password: '',
@@ -133,6 +134,7 @@ const ADScanner = () => {
           server: data.config.server || '',
           port: data.config.port || 389,
           use_ssl: data.config.use_ssl || false,
+          use_start_tls: data.config.use_start_tls || false,
           base_dn: data.config.base_dn || '',
           bind_user: data.config.bind_user || '',
           domain: data.config.domain || '',
@@ -177,7 +179,7 @@ const ADScanner = () => {
     try {
       await api.post('/ad-scanner/disconnect')
       setConnection({ connected: false, config: null })
-      setConnForm({ server: '', port: 389, use_ssl: false, base_dn: '', bind_user: '', bind_password: '', domain: '' })
+      setConnForm({ server: '', port: 389, use_ssl: false, use_start_tls: false, base_dn: '', bind_user: '', bind_password: '', domain: '' })
       setTestResult(null)
     } catch (err) { showNotification('error', 'Failed to disconnect') }
   }
@@ -761,18 +763,29 @@ const ADScanner = () => {
                 </div>
               </div>
 
-              {/* SSL Toggle */}
-              <div className="flex items-center gap-3">
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={connForm.use_ssl}
-                    onChange={e => setConnForm({ ...connForm, use_ssl: e.target.checked, port: e.target.checked ? 636 : 389 })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-10 h-5 bg-gray-200 rounded-full peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></div>
-                </label>
-                <span className="text-sm font-medium text-gray-700">Use SSL/TLS (LDAPS on port 636)</span>
+              {/* Encryption Mode */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Encryption</label>
+                <select
+                  value={connForm.use_ssl ? 'ldaps' : connForm.use_start_tls ? 'starttls' : 'none'}
+                  onChange={e => {
+                    const v = e.target.value
+                    setConnForm({
+                      ...connForm,
+                      use_ssl: v === 'ldaps',
+                      use_start_tls: v === 'starttls',
+                      port: v === 'ldaps' ? 636 : 389,
+                    })
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                >
+                  <option value="none">None (plain LDAP, port 389)</option>
+                  <option value="starttls">StartTLS (encrypted, port 389) — Recommended</option>
+                  <option value="ldaps">LDAPS / SSL (encrypted, port 636)</option>
+                </select>
+                {!connForm.use_ssl && !connForm.use_start_tls && (
+                  <p className="text-xs text-amber-600 mt-1">⚠ Without encryption, password operations (create user, reset password) will fail.</p>
+                )}
               </div>
 
               {/* Test result */}
