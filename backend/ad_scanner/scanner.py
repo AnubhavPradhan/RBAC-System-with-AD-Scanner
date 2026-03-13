@@ -26,6 +26,7 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
     ad_server = settings.AD_SERVER
     ad_port = settings.AD_PORT
     ad_use_ssl = settings.AD_USE_SSL
+    ad_use_start_tls = getattr(settings, 'AD_USE_START_TLS', False)
     ad_base_dn = settings.AD_BASE_DN
     ad_bind_user = settings.AD_BIND_USER
     ad_bind_password = settings.AD_BIND_PASSWORD
@@ -38,6 +39,7 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
             ad_server = cfg.server
             ad_port = cfg.port
             ad_use_ssl = cfg.use_ssl
+            ad_use_start_tls = cfg.use_start_tls
             ad_base_dn = cfg.base_dn
             ad_bind_user = cfg.bind_user
             ad_bind_password = cfg.bind_password
@@ -54,12 +56,12 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
         from ldap3 import Server, Connection, ALL, SUBTREE, Tls
         import ssl as ssl_mod
 
-        logger.info("[AD Scanner] Connecting to %s:%d (SSL=%s) as %s, base=%s",
-                     ad_server, ad_port, ad_use_ssl, ad_bind_user, ad_base_dn)
+        logger.info("[AD Scanner] Connecting to %s:%d (SSL=%s, StartTLS=%s) as %s, base=%s",
+                     ad_server, ad_port, ad_use_ssl, ad_use_start_tls, ad_bind_user, ad_base_dn)
 
         tls_config = None
-        if ad_use_ssl:
-            tls_config = Tls(validate=ssl_mod.CERT_NONE)
+        if ad_use_ssl or ad_use_start_tls:
+            tls_config = Tls(validate=ssl_mod.CERT_NONE, version=ssl_mod.PROTOCOL_TLS)
 
         server = Server(
             ad_server,
@@ -70,11 +72,12 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
             connect_timeout=10,
         )
 
+        auto = 'TLS_BEFORE_BIND' if (ad_use_start_tls and not ad_use_ssl) else True
         conn = Connection(
             server,
             user=ad_bind_user,
             password=ad_bind_password,
-            auto_bind=True,
+            auto_bind=auto,
             receive_timeout=10,
         )
 

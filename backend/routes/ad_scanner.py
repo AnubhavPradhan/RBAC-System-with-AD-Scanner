@@ -21,6 +21,7 @@ class ADConnectRequest(BaseModel):
     server: str
     port: int = 389
     use_ssl: bool = False
+    use_start_tls: bool = False
     base_dn: str
     bind_user: str
     bind_password: str
@@ -39,6 +40,7 @@ def get_connection(current_user: User = Depends(get_current_user), db: Session =
             "server": cfg.server,
             "port": cfg.port,
             "use_ssl": cfg.use_ssl,
+            "use_start_tls": cfg.use_start_tls,
             "base_dn": cfg.base_dn,
             "bind_user": cfg.bind_user,
             "domain": cfg.domain,
@@ -54,9 +56,7 @@ def test_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
         from ldap3 import Server, Connection, ALL, Tls
         import ssl as ssl_mod
 
-        tls_config = None
-        if body.use_ssl:
-            tls_config = Tls(validate=ssl_mod.CERT_NONE)
+        tls_config = Tls(validate=ssl_mod.CERT_NONE, version=ssl_mod.PROTOCOL_TLS) if (body.use_ssl or body.use_start_tls) else None
 
         server = Server(
             body.server,
@@ -66,18 +66,21 @@ def test_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             get_info=ALL,
             connect_timeout=10,
         )
+
+        auto = 'TLS_BEFORE_BIND' if (body.use_start_tls and not body.use_ssl) else True
         conn = Connection(
             server,
             user=body.bind_user,
             password=body.bind_password,
-            auto_bind=True,
+            auto_bind=auto,
             receive_timeout=10,
         )
+        enc = 'StartTLS' if body.use_start_tls else ('SSL' if body.use_ssl else 'plain')
         info = server.info
         conn.unbind()
         return {
             "success": True,
-            "message": f"Successfully connected to {body.server}:{body.port}",
+            "message": f"Successfully connected to {body.server}:{body.port} ({enc})",
             "server_info": str(info.naming_contexts) if info else None,
         }
     except Exception as e:
@@ -92,9 +95,7 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
         from ldap3 import Server, Connection, ALL, Tls
         import ssl as ssl_mod
 
-        tls_config = None
-        if body.use_ssl:
-            tls_config = Tls(validate=ssl_mod.CERT_NONE)
+        tls_config = Tls(validate=ssl_mod.CERT_NONE, version=ssl_mod.PROTOCOL_TLS) if (body.use_ssl or body.use_start_tls) else None
 
         server = Server(
             body.server,
@@ -104,11 +105,13 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             get_info=ALL,
             connect_timeout=10,
         )
+
+        auto = 'TLS_BEFORE_BIND' if (body.use_start_tls and not body.use_ssl) else True
         conn = Connection(
             server,
             user=body.bind_user,
             password=body.bind_password,
-            auto_bind=True,
+            auto_bind=auto,
             receive_timeout=10,
         )
         conn.unbind()
@@ -123,6 +126,7 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
         cfg.server = body.server
         cfg.port = body.port
         cfg.use_ssl = body.use_ssl
+        cfg.use_start_tls = body.use_start_tls
         cfg.base_dn = body.base_dn
         cfg.bind_user = body.bind_user
         cfg.bind_password = body.bind_password
@@ -133,6 +137,7 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             server=body.server,
             port=body.port,
             use_ssl=body.use_ssl,
+            use_start_tls=body.use_start_tls,
             base_dn=body.base_dn,
             bind_user=body.bind_user,
             bind_password=body.bind_password,
@@ -141,14 +146,15 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
         )
         db.add(cfg)
 
+    enc = 'StartTLS' if body.use_start_tls else ('SSL' if body.use_ssl else 'LDAP')
     db.add(AuditLog(
         user_email=current_user.email, action="AD Connect", resource="AD Scanner",
-        details=f"Connected to AD server {body.server}:{body.port} ({'SSL' if body.use_ssl else 'LDAP'})",
+        details=f"Connected to AD server {body.server}:{body.port} ({enc})",
         severity="Info",
     ))
     db.commit()
 
-    return {"success": True, "connected": True, "message": f"Connected to {body.server}:{body.port}"}
+    return {"success": True, "connected": True, "message": f"Connected to {body.server}:{body.port} ({enc})"}
 
 
 @router.post("/disconnect")
@@ -957,9 +963,10 @@ def _get_ldap_conn(db: Session):
         raise HTTPException(400, "No active AD connection.")
     from ldap3 import Server, Connection, ALL, Tls
     import ssl as ssl_mod
-    tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
+    tls_config = Tls(validate=ssl_mod.CERT_NONE, version=ssl_mod.PROTOCOL_TLS) if (cfg.use_ssl or cfg.use_start_tls) else None
     server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
-    conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, receive_timeout=15)
+    auto = 'TLS_BEFORE_BIND' if (cfg.use_start_tls and not cfg.use_ssl) else True
+    conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=auto, receive_timeout=15)
     return conn, cfg
 
 
@@ -1028,10 +1035,18 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
         if not ok:
             raise HTTPException(400, f"Failed to create user: {conn.result.get('description', conn.result)}")
 
-        # Set password
+        # Set password (requires LDAPS or StartTLS — AD rejects unicodePwd over plain LDAP)
         pwd_quoted = f'"{body.password}"'
         encoded_pwd = pwd_quoted.encode("utf-16-le")
-        conn.modify(user_dn, {"unicodePwd": [(MODIFY_REPLACE, [encoded_pwd])]})
+        pwd_ok = conn.modify(user_dn, {"unicodePwd": [(MODIFY_REPLACE, [encoded_pwd])]})
+        if not pwd_ok:
+            pwd_err = conn.result.get('description', conn.result)
+            # Clean up the user so we don't leave an account with no password
+            conn.delete(user_dn)
+            hint = ""
+            if not cfg.use_ssl and not cfg.use_start_tls:
+                hint = " Hint: Password changes require an encrypted connection. Enable StartTLS (recommended) or LDAPS in AD connection settings."
+            raise HTTPException(400, f"Failed to set password: {pwd_err}.{hint}")
 
         # Build UAC
         uac = 512  # NORMAL_ACCOUNT
@@ -1040,6 +1055,9 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
         if body.password_never_expires:
             uac |= 0x10000
         conn.modify(user_dn, {"userAccountControl": [(MODIFY_REPLACE, [str(uac)])]})
+
+        # Clear "User must change password at next logon" so the account can log in immediately
+        conn.modify(user_dn, {"pwdLastSet": [(MODIFY_REPLACE, ["-1"])]})
 
         conn.unbind()
         db.add(AuditLog(user_email=current_user.email, action="Create", resource="AD User",
