@@ -142,6 +142,7 @@ class ADConnectionConfig(Base):
     server = Column(String(300), nullable=False)       # IP or hostname
     port = Column(Integer, default=389)
     use_ssl = Column(Boolean, default=False)
+    use_start_tls = Column(Boolean, default=False)     # StartTLS on port 389
     base_dn = Column(String(300), nullable=False)      # e.g. DC=mylab,DC=local
     bind_user = Column(String(300), nullable=False)     # full DN or domain\\user
     bind_password = Column(String(300), nullable=False)
@@ -157,6 +158,11 @@ def init_db():
     with engine.connect() as conn:
         try:
             conn.execute(__import__('sqlalchemy').text("ALTER TABLE users ADD COLUMN last_login DATETIME"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(__import__('sqlalchemy').text("ALTER TABLE ad_connection_config ADD COLUMN use_start_tls BOOLEAN DEFAULT 0"))
             conn.commit()
         except Exception:
             pass  # Column already exists
