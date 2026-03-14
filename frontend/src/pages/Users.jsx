@@ -127,7 +127,7 @@ const Users = () => {
     <div>
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">Users Management</h1>
+          <h1 className="text-3xl font-bold text-blue-100">Users Management</h1>
           <p className="text-gray-600 mt-1">Manage user accounts and access controls</p>
         </div>
         <div className="flex gap-3">

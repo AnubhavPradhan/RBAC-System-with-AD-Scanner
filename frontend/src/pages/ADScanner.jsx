@@ -625,7 +625,7 @@ const ADScanner = () => {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-3">
+          <h1 className="text-3xl font-bold text-blue-100 flex items-center gap-3">
             <Shield className="w-8 h-8 text-blue-600" />
             Active Directory Scanner
           </h1>
@@ -852,40 +852,40 @@ const ADScanner = () => {
       {/* Summary Cards */}
       {scan && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-blue-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <Users className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">Total AD Users</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.total_users}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">Total AD Users</p>
+              <p className="text-5xl leading-none font-bold text-[#63a8ff]">{scan.total_users}</p>
+            </div>
+            <div className="bg-[#17315a] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <Users className="w-7 h-7 text-[#63a8ff]" />
             </div>
           </div>
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-red-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <AlertTriangle className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">High Risk Accounts</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.high_risk_count}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">High Risk Accounts</p>
+              <p className="text-5xl leading-none font-bold text-[#ff5f5f]">{scan.high_risk_count}</p>
+            </div>
+            <div className="bg-[#3f262c] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <AlertTriangle className="w-7 h-7 text-[#ff5f5f]" />
             </div>
           </div>
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-orange-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <Shield className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">Privileged Accounts</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.privileged_users}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">Privileged Accounts</p>
+              <p className="text-5xl leading-none font-bold text-[#ff962e]">{scan.privileged_users}</p>
+            </div>
+            <div className="bg-[#3a2b24] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <Shield className="w-7 h-7 text-[#ff962e]" />
             </div>
           </div>
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-gray-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <UserX className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">Stale Accounts</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.stale_accounts}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">Stale Accounts</p>
+              <p className="text-5xl leading-none font-bold text-[#b4bfce]">{scan.stale_accounts}</p>
+            </div>
+            <div className="bg-[#353b46] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <UserX className="w-7 h-7 text-[#b4bfce]" />
             </div>
           </div>
         </div>

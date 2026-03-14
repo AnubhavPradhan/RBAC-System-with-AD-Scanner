@@ -95,7 +95,7 @@ const Roles = () => {
   return (
     <div>
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800">Roles Management</h1>
+        <h1 className="text-3xl font-bold text-blue-100">Roles Management</h1>
         <button
           onClick={handleAddNew}
           className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"

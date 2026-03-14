@@ -29,30 +29,38 @@ const Sidebar = () => {
   )
 
   return (
-    <aside className="w-64 bg-gray-800 text-white min-h-screen fixed top-0 left-0 flex flex-col">
+    <aside className="w-64 text-white min-h-screen fixed top-0 left-0 flex flex-col" style={{ backgroundColor: 'var(--app-sidebar-color)' }}>
       <div className="p-6 flex-1 overflow-y-auto">
         <h1 className="text-xl font-bold mb-8">RBAC & AD Scanner</h1>
         <nav>
           <ul className="space-y-2">
-            {visibleMenuItems.map((item) => (
-              <li key={item.path}>
-                <Link
-                  to={item.path}
-                  className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
-                    location.pathname === item.path
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                  }`}
-                >
-                  {item.icon.startsWith('/') ? (
-                    <img src={item.icon} alt={item.name} className="w-5 h-5" />
-                  ) : (
-                    <span className="text-xl">{item.icon}</span>
-                  )}
-                  <span className="font-medium">{item.name}</span>
-                </Link>
-              </li>
-            ))}
+            {visibleMenuItems.map((item) => {
+              const isActive = location.pathname === item.path
+
+              return (
+                <li key={item.path}>
+                  <Link
+                    to={item.path}
+                    className={`flex items-center space-x-3 px-4 py-3 rounded-2xl border transition-all duration-200 ${
+                      isActive
+                        ? 'bg-[#162c5e] border-[#2a58b3] text-[#65a9ff] shadow-[0_10px_24px_rgba(0,0,0,0.28)]'
+                        : 'border-transparent text-[#8f9bb2] hover:bg-[#252a3a] hover:border-[#2f3c5d] hover:text-[#9dc5ff]'
+                    }`}
+                  >
+                    {item.icon.startsWith('/') ? (
+                      <img
+                        src={item.icon}
+                        alt={item.name}
+                        className={`w-5 h-5 transition-opacity ${isActive ? 'opacity-100' : 'opacity-80'}`}
+                      />
+                    ) : (
+                      <span className="text-xl">{item.icon}</span>
+                    )}
+                    <span className="font-medium">{item.name}</span>
+                  </Link>
+                </li>
+              )
+            })}
           </ul>
         </nav>
       </div>

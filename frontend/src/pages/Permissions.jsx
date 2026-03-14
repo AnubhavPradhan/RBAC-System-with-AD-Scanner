@@ -190,7 +190,7 @@ const Permissions = () => {
     <div>
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">Permissions Management</h1>
+          <h1 className="text-3xl font-bold text-blue-100">Permissions Management</h1>
           <p className="text-gray-600 mt-1">Define and manage access permissions for your application</p>
         </div>
         <button

@@ -154,7 +154,7 @@ const Reports = () => {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-gray-800 mb-8">Reports</h1>
+      <h1 className="text-3xl font-bold text-blue-100 mb-8">Reports</h1>
 
       {/* Filters + Report Types */}
       <div className="bg-white rounded-lg shadow-md mb-8">

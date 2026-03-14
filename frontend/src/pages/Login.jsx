@@ -48,7 +48,7 @@ const Login = () => {
   }
   
   return (
-    <div className="min-h-screen bg-gray-800 flex items-center justify-center px-4">
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: 'var(--app-bg-color)' }}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-800">Enhanced RBAC</h1>

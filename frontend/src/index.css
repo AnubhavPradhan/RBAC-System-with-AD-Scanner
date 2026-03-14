@@ -2,11 +2,118 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --app-bg-color: #16171d;
+  --app-surface-color: #1e1f28;
+  --app-sidebar-color: var(--app-surface-color);
+  --app-border-color: #2b2d38;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
+  background-color: var(--app-bg-color);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.app-shell .bg-white {
+  background-color: var(--app-surface-color) !important;
+}
+
+.app-shell {
+  color: #d5dae3;
+}
+
+.app-shell .shadow-md,
+.app-shell .shadow-lg,
+.app-shell .shadow-2xl {
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28) !important;
+}
+
+.app-shell .text-gray-800 {
+  color: #eceff4 !important;
+}
+
+.app-shell .text-gray-700 {
+  color: #d5dae3 !important;
+}
+
+.app-shell .text-gray-600 {
+  color: #b6bdca !important;
+}
+
+.app-shell .text-gray-500 {
+  color: #969eac !important;
+}
+
+.app-shell .text-gray-400 {
+  color: #7c8596 !important;
+}
+
+.app-shell .border-gray-100,
+.app-shell .border-gray-200,
+.app-shell .border-gray-300 {
+  border-color: var(--app-border-color) !important;
+}
+
+.app-shell .border-b,
+.app-shell table tr,
+.app-shell tbody tr {
+  border-color: var(--app-border-color) !important;
+}
+
+.app-shell .divide-y > :not([hidden]) ~ :not([hidden]),
+.app-shell .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+.app-shell .divide-gray-200 > :not([hidden]) ~ :not([hidden]),
+.app-shell .divide-gray-300 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--app-border-color) !important;
+}
+
+.app-shell .bg-gray-50 {
+  background-color: #242632 !important;
+}
+
+.app-shell .bg-gray-100 {
+  background-color: #2a2c39 !important;
+}
+
+.app-shell .hover\:bg-gray-50:hover {
+  background-color: #2b2e3c !important;
+}
+
+.app-shell input:not([type='checkbox']):not([type='radio']):not([type='button']):not([type='submit']):not([type='reset']):not([type='file']):not([type='range']):not([type='color']),
+.app-shell select,
+.app-shell textarea {
+  background-color: #242632 !important;
+  color: #eceff4 !important;
+  border-color: var(--app-border-color) !important;
+  color-scheme: dark;
+}
+
+.app-shell input::placeholder,
+.app-shell textarea::placeholder {
+  color: #9aa3b2 !important;
+}
+
+.app-shell select option {
+  background-color: #1e1f28;
+  color: #eceff4;
+}
+
+.app-shell .text-gray-900,
+.app-shell .text-black {
+  color: #eceff4 !important;
+}
+
+.app-shell .from-gray-50 {
+  --tw-gradient-from: #242632 var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(36 38 50 / 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.app-shell .to-gray-100 {
+  --tw-gradient-to: #2a2c39 var(--tw-gradient-to-position) !important;
 }
