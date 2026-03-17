@@ -49,12 +49,12 @@ const Login = () => {
   
   return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: 'var(--app-bg-color)' }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+      <div className="rounded-2xl shadow-2xl w-full max-w-md p-8 border" style={{ backgroundColor: 'var(--app-surface-color)', borderColor: 'var(--app-border-color)' }}>
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-800">Enhanced RBAC</h1>
+          <h1 className="text-3xl font-bold text-white">Enhanced RBAC</h1>
           
           {/* User sign up */}
-          <p className="text-gray-500 mt-2">
+          <p className="text-[#9aa3b2] mt-2">
             {isLogin ? 'Welcome back! Please login.' : 'Create your account'} 
           </p>
         </div>
@@ -68,13 +68,14 @@ const Login = () => {
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isLogin && (
             <div>
-              <label className="block text-gray-700 font-medium mb-2">Name</label>
+              <label className="block text-[#d8deea] font-medium mb-2">Name</label>
               <input
                 type="text"
                 name="name"
                 value={formData.name}
                 onChange={handleChange}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-white placeholder:text-[#9aa3b2]"
+                style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}
                 placeholder="Enter your name"
               />
             </div>
@@ -82,20 +83,21 @@ const Login = () => {
 
           {!isLogin && (
             <div>
-              <label className="block text-gray-700 font-medium mb-2">Username</label>
+              <label className="block text-[#d8deea] font-medium mb-2">Username</label>
               <input
                 type="text"
                 name="username"
                 value={formData.username}
                 onChange={handleChange}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-white placeholder:text-[#9aa3b2]"
+                style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}
                 placeholder="Choose a username"
               />
             </div>
           )}
 
           <div>
-            <label className="block text-gray-700 font-medium mb-2">
+            <label className="block text-[#d8deea] font-medium mb-2">
               {isLogin ? 'Email or Username' : 'Email'}
             </label>
             <input
@@ -103,20 +105,22 @@ const Login = () => {
               name="email"
               value={formData.email}
               onChange={handleChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-white placeholder:text-[#9aa3b2]"
+              style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}
               placeholder={isLogin ? 'Enter your email or username' : 'Enter your email'}
               required
             />
           </div>
 
           <div>
-            <label className="block text-gray-700 font-medium mb-2">Password</label>
+            <label className="block text-[#d8deea] font-medium mb-2">Password</label>
             <input
               type="password"
               name="password"
               value={formData.password}
               onChange={handleChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-white placeholder:text-[#9aa3b2]"
+              style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}
               placeholder="Enter your password"
               required
             />
@@ -144,26 +148,26 @@ const Login = () => {
         </div>
 
         {/* Default admin account for demo */}
-        <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+        <div className="mt-6 p-4 rounded-lg border" style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}>
           {isLogin ? (
             <>
-              <p className="text-sm text-gray-600 font-semibold mb-2">Default Admin Account:</p>
+              <p className="text-sm text-[#d8deea] font-semibold mb-2">Default Admin Account:</p>
               <div className="space-y-1">
-                <p className="text-xs text-gray-700">
+                <p className="text-xs text-[#c7cfdb]">
                   <span className="font-medium">Username:</span> admin
                 </p>
-                <p className="text-xs text-gray-700">
+                <p className="text-xs text-[#c7cfdb]">
                   <span className="font-medium">Email:</span> admin@gmail.com
                 </p>
-                <p className="text-xs text-gray-700">
+                <p className="text-xs text-[#c7cfdb]">
                   <span className="font-medium">Password:</span> admin123
                 </p>
               </div>
             </>
           ) : (
             <>
-              <p className="text-sm text-gray-600 font-semibold mb-1">New Users:</p>
-              <p className="text-xs text-gray-500">Will be assigned Viewer role by default. Contact admin for elevated access.</p>
+              <p className="text-sm text-[#d8deea] font-semibold mb-1">New Users:</p>
+              <p className="text-xs text-[#9aa3b2]">Will be assigned Viewer role by default. Contact admin for elevated access.</p>
             </>
           )}
         </div>

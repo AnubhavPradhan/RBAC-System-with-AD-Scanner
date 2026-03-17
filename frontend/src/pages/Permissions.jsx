@@ -1,6 +1,38 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Lock, CheckCircle, XCircle } from 'lucide-react'
+import { Lock, CheckCircle, XCircle, Pencil, Trash2 } from 'lucide-react'
 import api from '../utils/api'
+
+const SURFACE_STYLE = {
+  backgroundColor: 'var(--app-surface-color)',
+  borderColor: 'var(--app-border-color)'
+}
+
+const STAT_META = [
+  {
+    key: 'total',
+    label: 'Total Permissions',
+    Icon: Lock,
+    valueColor: 'text-[#63a8ff]',
+    iconColor: 'text-[#63a8ff]',
+    iconBg: 'bg-[#17315a]'
+  },
+  {
+    key: 'active',
+    label: 'Active Permissions',
+    Icon: CheckCircle,
+    valueColor: 'text-[#40e1b2]',
+    iconColor: 'text-[#40e1b2]',
+    iconBg: 'bg-[#133c43]'
+  },
+  {
+    key: 'inactive',
+    label: 'Inactive Permissions',
+    Icon: XCircle,
+    valueColor: 'text-[#b4bfce]',
+    iconColor: 'text-[#b4bfce]',
+    iconBg: 'bg-[#353b46]'
+  },
+]
 
 const Permissions = () => {
   const [showModal, setShowModal] = useState(false)
@@ -203,33 +235,17 @@ const Permissions = () => {
 
       {/* Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-          <div className="bg-blue-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-            <Lock className="w-6 h-6 text-white" />
+        {STAT_META.map((meta) => (
+          <div key={meta.key} className="rounded-2xl border shadow-md p-6 flex items-start justify-between" style={SURFACE_STYLE}>
+            <div>
+              <p className="text-blue-200 text-sm font-medium mb-2">{meta.label}</p>
+              <p className={`text-5xl leading-none font-bold ${meta.valueColor}`}>{stats[meta.key]}</p>
+            </div>
+            <div className={`${meta.iconBg} w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center`}>
+              <meta.Icon className={`w-7 h-7 ${meta.iconColor}`} />
+            </div>
           </div>
-          <div>
-            <p className="text-gray-500 text-sm font-medium">Total Permissions</p>
-            <p className="text-3xl font-bold text-gray-800">{stats.total}</p>
-          </div>
-        </div>
-        <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-          <div className="bg-green-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-            <CheckCircle className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <p className="text-gray-500 text-sm font-medium">Active Permissions</p>
-            <p className="text-3xl font-bold text-gray-800">{stats.active}</p>
-          </div>
-        </div>
-        <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-          <div className="bg-gray-400 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-            <XCircle className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <p className="text-gray-500 text-sm font-medium">Inactive Permissions</p>
-            <p className="text-3xl font-bold text-gray-800">{stats.inactive}</p>
-          </div>
-        </div>
+        ))}
       </div>
 
       {/* Search and Filter Bar */}
@@ -305,14 +321,14 @@ const Permissions = () => {
 
         {/* Bulk Actions Bar */}
         {selectedPermissions.length > 0 && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
+          <div className="rounded-lg p-4 flex items-center justify-between border" style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}>
             <div className="flex items-center space-x-3">
-              <span className="text-blue-800 font-semibold">
+              <span className="text-blue-200 font-semibold">
                 {selectedPermissions.length} permission{selectedPermissions.length > 1 ? 's' : ''} selected
               </span>
               <button
                 onClick={() => setSelectedPermissions([])}
-                className="text-blue-600 hover:text-blue-800 text-sm underline"
+                className="text-blue-400 hover:text-blue-300 text-sm underline"
               >
                 Clear selection
               </button>
@@ -420,7 +436,7 @@ const Permissions = () => {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center gap-4">
                       <button
                         onClick={() => toggleStatus(permission.id)}
                         className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
@@ -434,17 +450,17 @@ const Permissions = () => {
                       </button>
                       <button 
                         onClick={() => handleEditPermission(permission)}
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        className="text-gray-500 hover:text-blue-600 transition-colors"
                         title="Edit permission"
                       >
-                        <span className="text-xl">✏️</span>
+                        <Pencil className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleDeletePermission(permission.id)}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        className="text-red-500 hover:text-red-700 transition-colors"
                         title="Delete permission"
                       >
-                        <span className="text-xl">🗑️</span>
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -528,24 +544,6 @@ const Permissions = () => {
                 </div>
               </div>
 
-              {/* Help Text */}
-              {!editingPermission && (
-              <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <div className="flex items-start space-x-2">
-                  <span className="text-blue-600 text-xl">💡</span>
-                  <div className="flex-1">
-                    <h4 className="text-sm font-semibold text-blue-900 mb-1">Tips for creating permissions</h4>
-                    <ul className="text-xs text-blue-800 space-y-1">
-                      <li>• Use clear, action-oriented names (e.g., "Create", "Edit", "Delete")</li>
-                      <li>• Group related permissions in the same category</li>
-                      <li>• Write descriptions that explain what users can do with this permission</li>
-                      <li>• Start with "Inactive" status if you want to test before enabling</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-              )}
-
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
                 <button
                   type="button"
@@ -581,31 +579,11 @@ const Permissions = () => {
               </p>
             </div>
 
-            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="flex items-start space-x-2">
-                <span className="text-yellow-600 text-xl">⚠️</span>
-                <div className="flex-1">
-                  <h4 className="text-sm font-semibold text-yellow-900 mb-2">Warning</h4>
-                  {permissionToDelete.usedBy && permissionToDelete.usedBy.length > 0 && (
-                    <>
-                      <p className="text-xs text-yellow-800 mb-2">
-                        This permission is currently used by the following roles:
-                      </p>
-                      <div className="flex flex-wrap gap-1 mb-2">
-                        {permissionToDelete.usedBy.map((role, idx) => (
-                          <span key={idx} className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
-                            {role}
-                          </span>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                  <p className="text-xs text-yellow-800">
-                    <strong>This action cannot be undone.</strong> The permission will be permanently deleted from the system.
-                  </p>
-                </div>
-              </div>
-            </div>
+            {permissionToDelete.usedBy && permissionToDelete.usedBy.length > 0 && (
+              <p className="text-sm text-gray-500 mb-6">
+                Used by: {permissionToDelete.usedBy.join(', ')}
+              </p>
+            )}
 
             <div className="flex justify-end space-x-3">
               <button
