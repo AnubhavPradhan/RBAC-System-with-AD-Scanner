@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Shield, AlertTriangle, Users, UserX, Key, RefreshCw, ChevronDown, ChevronUp, Search, Server, Wifi, WifiOff, Plug, Unplug, Eye, EyeOff, XCircle, CheckCircle, Info, AlertCircle, X } from 'lucide-react'
+import { Shield, AlertTriangle, Users, UserX, Key, RefreshCw, ChevronDown, ChevronUp, Search, Server, Wifi, WifiOff, Plug, Unplug, Eye, EyeOff, XCircle, CheckCircle, Info, AlertCircle, X, Plus, Pencil, Trash2, UserPlus, UserMinus, Monitor } from 'lucide-react'
 import api from '../utils/api'
 
 const RISK_COLORS = {
@@ -29,6 +29,7 @@ const ADScanner = () => {
     server: '',
     port: 389,
     use_ssl: false,
+    use_start_tls: false,
     base_dn: '',
     bind_user: '',
     bind_password: '',
@@ -56,7 +57,6 @@ const ADScanner = () => {
   const [filterRisk, setFilterRisk] = useState('All')
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedUser, setExpandedUser] = useState(null)
-  const [scanHistory, setScanHistory] = useState([])
   const [mappings, setMappings] = useState([])
   const [roles, setRoles] = useState([])
   const [syncResult, setSyncResult] = useState(null)
@@ -79,14 +79,49 @@ const ADScanner = () => {
   const [computerSearch, setComputerSearch] = useState('')
   const [computerFilter, setComputerFilter] = useState('All')
 
+  // ── CRUD: User ──
+  const [showUserModal, setShowUserModal] = useState(false)
+  const [userModalMode, setUserModalMode] = useState('create')
+  const [userForm, setUserForm] = useState({ first_name: '', last_name: '', initials: '', full_name: '', sam_account_name: '', upn_suffix: '', password: '', description: '', enabled: true, password_never_expires: false, ou_dn: '' })
+  const [editingUserSam, setEditingUserSam] = useState(null)
+  const [showGroupAssignModal, setShowGroupAssignModal] = useState(false)
+  const [groupAssignUser, setGroupAssignUser] = useState(null)
+  const [groupAssignAction, setGroupAssignAction] = useState('add')
+  const [selectedGroupDn, setSelectedGroupDn] = useState('')
+
+  // ── CRUD: Group ──
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false)
+  const [createGroupForm, setCreateGroupForm] = useState({ name: '', scope: 'Global', group_type: 'Security', description: '', ou_dn: '' })
+  const [showEditGroupModal, setShowEditGroupModal] = useState(false)
+  const [editGroupForm, setEditGroupForm] = useState({ description: '' })
+  const [editGroupCn, setEditGroupCn] = useState('')
+
+  // ── CRUD: OU ──
+  const [showOuModal, setShowOuModal] = useState(false)
+  const [ouForm, setOuForm] = useState({ name: '', description: '', parent_dn: '' })
+  const [showEditOuModal, setShowEditOuModal] = useState(false)
+  const [editOuForm, setEditOuForm] = useState({ description: '' })
+  const [editOuDn, setEditOuDn] = useState('')
+
+  // ── CRUD: Computer ──
+  const [showComputerModal, setShowComputerModal] = useState(false)
+  const [computerForm, setComputerForm] = useState({ name: '', ou_dn: '', description: '' })
+  const [showEditComputerModal, setShowEditComputerModal] = useState(false)
+  const [editComputerForm, setEditComputerForm] = useState({ description: '', enabled: true })
+  const [editComputerCn, setEditComputerCn] = useState('')
+
   // ── Domain Controllers ──
   const [dcs, setDcs] = useState([])
   const [dcsLoading, setDcsLoading] = useState(false)
 
+  const formatScanTimestamp = (value) => {
+    if (!value) return '-'
+    return String(value).replace(/\.\d+$/, '')
+  }
+
   useEffect(() => {
     fetchConnectionStatus()
     fetchLatestScan()
-    fetchScanHistory()
     fetchMappings()
     fetchRoles()
   }, [])
@@ -102,6 +137,7 @@ const ADScanner = () => {
           server: data.config.server || '',
           port: data.config.port || 389,
           use_ssl: data.config.use_ssl || false,
+          use_start_tls: data.config.use_start_tls || false,
           base_dn: data.config.base_dn || '',
           bind_user: data.config.bind_user || '',
           domain: data.config.domain || '',
@@ -146,7 +182,7 @@ const ADScanner = () => {
     try {
       await api.post('/ad-scanner/disconnect')
       setConnection({ connected: false, config: null })
-      setConnForm({ server: '', port: 389, use_ssl: false, base_dn: '', bind_user: '', bind_password: '', domain: '' })
+      setConnForm({ server: '', port: 389, use_ssl: false, use_start_tls: false, base_dn: '', bind_user: '', bind_password: '', domain: '' })
       setTestResult(null)
     } catch (err) { showNotification('error', 'Failed to disconnect') }
   }
@@ -158,13 +194,6 @@ const ADScanner = () => {
       const { data } = await api.get('/ad-scanner/latest')
       if (data.scan) setScanData(data)
     } catch (err) { console.error('Failed to fetch latest scan:', err) }
-  }
-
-  const fetchScanHistory = async () => {
-    try {
-      const { data } = await api.get('/ad-scanner/scans')
-      setScanHistory(data)
-    } catch (err) { console.error('Failed to fetch scan history:', err) }
   }
 
   const fetchMappings = async () => {
@@ -228,9 +257,8 @@ const ADScanner = () => {
     setScanning(true)
     setSyncResult(null)
     try {
-      const { data } = await api.post('/ad-scanner/scan')
+      await api.post('/ad-scanner/scan')
       await fetchLatestScan()
-      await fetchScanHistory()
     } catch (err) { showNotification('error', 'Scan failed: ' + (err.response?.data?.detail || err.message)) }
     finally { setScanning(false) }
   }
@@ -266,11 +294,215 @@ const ADScanner = () => {
     } catch (err) { showNotification('error', 'Delete failed') }
   }
 
+  // ══════════════════════════════════════
+  // CRUD Handlers
+  // ══════════════════════════════════════
+
+  // ── User CRUD ──
+  const openCreateUser = () => {
+    setUserModalMode('create')
+    setUserForm({ first_name: '', last_name: '', initials: '', full_name: '', sam_account_name: '', upn_suffix: connection?.config?.domain || '', password: '', description: '', enabled: true, password_never_expires: false, ou_dn: '' })
+    setShowUserModal(true)
+  }
+
+  const openEditUser = (user) => {
+    setUserModalMode('edit')
+    setEditingUserSam(user.sam_account_name)
+    setUserForm({
+      first_name: user.display_name?.split(' ')[0] || '',
+      last_name: user.display_name?.split(' ').slice(1).join(' ') || '',
+      initials: '',
+      full_name: user.display_name || '',
+      sam_account_name: user.sam_account_name,
+      upn_suffix: '',
+      password: '',
+      description: user.description || '',
+      enabled: user.enabled,
+      password_never_expires: user.password_never_expires || false,
+      ou_dn: '',
+    })
+    setShowUserModal(true)
+  }
+
+  const handleSaveUser = async (e) => {
+    e.preventDefault()
+    try {
+      if (userModalMode === 'create') {
+        await api.post('/ad-scanner/users', userForm)
+        showNotification('success', `User '${userForm.sam_account_name}' created successfully`)
+      } else {
+        await api.put(`/ad-scanner/users/${editingUserSam}`, {
+          first_name: userForm.first_name || undefined,
+          last_name: userForm.last_name || undefined,
+          initials: userForm.initials || undefined,
+          display_name: userForm.full_name || undefined,
+          email: userForm.email || undefined,
+          description: userForm.description,
+          enabled: userForm.enabled,
+          password_never_expires: userForm.password_never_expires,
+        })
+        showNotification('success', `User '${editingUserSam}' updated successfully`)
+      }
+      setShowUserModal(false)
+      await handleRunScan()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Operation failed')
+    }
+  }
+
+  const handleDeleteUser = async (sam) => {
+    const confirmed = await showConfirm(`Delete user '${sam}' from Active Directory? This cannot be undone.`)
+    if (!confirmed) return
+    try {
+      await api.delete(`/ad-scanner/users/${sam}`)
+      showNotification('success', `User '${sam}' deleted`)
+      await handleRunScan()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Delete failed')
+    }
+  }
+
+  const openGroupAssign = (user, action) => {
+    setGroupAssignUser(user)
+    setGroupAssignAction(action)
+    setSelectedGroupDn('')
+    if (adGroups.length === 0) fetchAdGroups()
+    setShowGroupAssignModal(true)
+  }
+
+  const handleGroupAssign = async () => {
+    if (!selectedGroupDn || !groupAssignUser) return
+    try {
+      const endpoint = groupAssignAction === 'add' ? 'add-to-group' : 'remove-from-group'
+      await api.post(`/ad-scanner/users/${groupAssignUser.sam_account_name}/${endpoint}`, { group_dn: selectedGroupDn })
+      showNotification('success', `User ${groupAssignAction === 'add' ? 'added to' : 'removed from'} group`)
+      setShowGroupAssignModal(false)
+      await handleRunScan()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Failed')
+    }
+  }
+
+  // ── Group CRUD ──
+  const handleCreateGroup = async (e) => {
+    e.preventDefault()
+    try {
+      await api.post('/ad-scanner/groups/create', createGroupForm)
+      showNotification('success', `Group '${createGroupForm.name}' created`)
+      setShowCreateGroupModal(false)
+      setCreateGroupForm({ name: '', scope: 'Global', group_type: 'Security', description: '', ou_dn: '' })
+      await fetchAdGroups()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Create failed')
+    }
+  }
+
+  const handleUpdateGroup = async (e) => {
+    e.preventDefault()
+    try {
+      await api.put(`/ad-scanner/groups/${editGroupCn}`, { description: editGroupForm.description })
+      showNotification('success', `Group '${editGroupCn}' updated`)
+      setShowEditGroupModal(false)
+      await fetchAdGroups()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Update failed')
+    }
+  }
+
+  const handleDeleteGroup = async (cn) => {
+    const confirmed = await showConfirm(`Delete group '${cn}'? This cannot be undone.`)
+    if (!confirmed) return
+    try {
+      await api.delete(`/ad-scanner/groups/${cn}`)
+      showNotification('success', `Group '${cn}' deleted`)
+      await fetchAdGroups()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Delete failed')
+    }
+  }
+
+  // ── OU CRUD ──
+  const handleCreateOu = async (e) => {
+    e.preventDefault()
+    try {
+      await api.post('/ad-scanner/ous/create', ouForm)
+      showNotification('success', `OU '${ouForm.name}' created`)
+      setShowOuModal(false)
+      setOuForm({ name: '', description: '', parent_dn: '' })
+      await fetchOus()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Create failed')
+    }
+  }
+
+  const handleUpdateOu = async (e) => {
+    e.preventDefault()
+    try {
+      await api.put(`/ad-scanner/ous/update?dn=${encodeURIComponent(editOuDn)}&description=${encodeURIComponent(editOuForm.description)}`)
+      showNotification('success', 'OU updated')
+      setShowEditOuModal(false)
+      await fetchOus()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Update failed')
+    }
+  }
+
+  const handleDeleteOu = async (dn, name) => {
+    const confirmed = await showConfirm(`Delete OU '${name}'? It must be empty.`)
+    if (!confirmed) return
+    try {
+      await api.delete(`/ad-scanner/ous/delete?dn=${encodeURIComponent(dn)}`)
+      showNotification('success', `OU '${name}' deleted`)
+      await fetchOus()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Delete failed')
+    }
+  }
+
+  // ── Computer CRUD ──
+  const handleCreateComputer = async (e) => {
+    e.preventDefault()
+    try {
+      await api.post('/ad-scanner/computers/create', computerForm)
+      showNotification('success', `Computer '${computerForm.name}' created`)
+      setShowComputerModal(false)
+      setComputerForm({ name: '', ou_dn: '', description: '' })
+      await fetchComputers()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Create failed')
+    }
+  }
+
+  const handleUpdateComputer = async (e) => {
+    e.preventDefault()
+    try {
+      await api.put(`/ad-scanner/computers/${editComputerCn}`, editComputerForm)
+      showNotification('success', `Computer '${editComputerCn}' updated`)
+      setShowEditComputerModal(false)
+      await fetchComputers()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Update failed')
+    }
+  }
+
+  const handleDeleteComputer = async (cn) => {
+    const confirmed = await showConfirm(`Delete computer '${cn}'? This cannot be undone.`)
+    if (!confirmed) return
+    try {
+      await api.delete(`/ad-scanner/computers/${cn}`)
+      showNotification('success', `Computer '${cn}' deleted`)
+      await fetchComputers()
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Delete failed')
+    }
+  }
+
   const scan = scanData?.scan
   const users = scanData?.users || []
   const riskBreakdown = scanData?.risk_breakdown || []
   const riskLevels = scanData?.risk_levels || {}
 
+  const SYSTEM_ACCOUNTS = ['guest', 'krbtgt']
   const filteredUsers = users.filter(u => {
     const matchesRisk = filterRisk === 'All' || u.risk_level === filterRisk
     const matchesSearch = !searchQuery ||
@@ -278,6 +510,12 @@ const ADScanner = () => {
       u.sam_account_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.email?.toLowerCase().includes(searchQuery.toLowerCase())
     return matchesRisk && matchesSearch
+  }).sort((a, b) => {
+    const aSystem = SYSTEM_ACCOUNTS.includes(a.sam_account_name?.toLowerCase())
+    const bSystem = SYSTEM_ACCOUNTS.includes(b.sam_account_name?.toLowerCase())
+    if (aSystem && !bSystem) return 1
+    if (!aSystem && bSystem) return -1
+    return 0
   })
 
   const tabs = [
@@ -289,7 +527,6 @@ const ADScanner = () => {
     { id: 'dcs', label: 'Domain Controllers' },
     { id: 'risks', label: 'Risk Analysis' },
     { id: 'mappings', label: 'Role Mappings' },
-    { id: 'history', label: 'Scan History' },
   ]
 
   // ── Loading state ──
@@ -303,10 +540,10 @@ const ADScanner = () => {
 
   // ── Notification config ──
   const notificationConfig = {
-    error:   { icon: XCircle,       bg: 'bg-red-50',     border: 'border-red-300',   icon_color: 'text-red-500',    title: 'Error' },
-    success: { icon: CheckCircle,   bg: 'bg-green-50',   border: 'border-green-300', icon_color: 'text-green-500',  title: 'Success' },
-    warning: { icon: AlertCircle,   bg: 'bg-yellow-50',  border: 'border-yellow-300',icon_color: 'text-yellow-500', title: 'Warning' },
-    info:    { icon: Info,          bg: 'bg-blue-50',    border: 'border-blue-300',  icon_color: 'text-blue-500',   title: 'Information' },
+    error:   { icon: XCircle,       bg: 'bg-[#1e1f28]',  border: 'border-red-500/60',    icon_color: 'text-red-500',    title: 'Error' },
+    success: { icon: CheckCircle,   bg: 'bg-[#1e1f28]',  border: 'border-green-500/60',  icon_color: 'text-green-500',  title: 'Success' },
+    warning: { icon: AlertCircle,   bg: 'bg-[#1e1f28]',  border: 'border-yellow-500/60', icon_color: 'text-yellow-500', title: 'Warning' },
+    info:    { icon: Info,          bg: 'bg-[#1e1f28]',  border: 'border-blue-500/60',   icon_color: 'text-blue-500',   title: 'Information' },
   }
 
   return (
@@ -316,7 +553,7 @@ const ADScanner = () => {
         const cfg = notificationConfig[notification.type] || notificationConfig.info
         const Icon = cfg.icon
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setNotification(null)} />
             <div className={`relative z-10 w-full max-w-md mx-4 rounded-2xl shadow-2xl border-2 ${cfg.bg} ${cfg.border} p-6`}>
               <div className="flex items-start gap-4">
@@ -324,12 +561,12 @@ const ADScanner = () => {
                   <Icon className="w-7 h-7" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-base font-semibold text-gray-800 mb-1">{cfg.title}</h3>
-                  <p className="text-sm text-gray-600 break-words">{notification.message}</p>
+                  <h3 className="text-base font-semibold text-[#e8efff] mb-1">{cfg.title}</h3>
+                  <p className="text-sm text-[#b6c2da] break-words">{notification.message}</p>
                 </div>
                 <button
                   onClick={() => setNotification(null)}
-                  className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+                  className="flex-shrink-0 text-[#8f9bb2] hover:text-[#d4ddf3] transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -337,7 +574,7 @@ const ADScanner = () => {
               <div className="mt-5 flex justify-end">
                 <button
                   onClick={() => setNotification(null)}
-                  className="px-5 py-2 bg-gray-800 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors"
+                  className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   OK
                 </button>
@@ -382,7 +619,7 @@ const ADScanner = () => {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-3">
+          <h1 className="text-3xl font-bold text-blue-100 flex items-center gap-3">
             <Shield className="w-8 h-8 text-blue-600" />
             Active Directory Scanner
           </h1>
@@ -520,18 +757,29 @@ const ADScanner = () => {
                 </div>
               </div>
 
-              {/* SSL Toggle */}
-              <div className="flex items-center gap-3">
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={connForm.use_ssl}
-                    onChange={e => setConnForm({ ...connForm, use_ssl: e.target.checked, port: e.target.checked ? 636 : 389 })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-10 h-5 bg-gray-200 rounded-full peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></div>
-                </label>
-                <span className="text-sm font-medium text-gray-700">Use SSL/TLS (LDAPS on port 636)</span>
+              {/* Encryption Mode */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Encryption</label>
+                <select
+                  value={connForm.use_ssl ? 'ldaps' : connForm.use_start_tls ? 'starttls' : 'none'}
+                  onChange={e => {
+                    const v = e.target.value
+                    setConnForm({
+                      ...connForm,
+                      use_ssl: v === 'ldaps',
+                      use_start_tls: v === 'starttls',
+                      port: v === 'ldaps' ? 636 : 389,
+                    })
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                >
+                  <option value="none">None (plain LDAP, port 389)</option>
+                  <option value="starttls">StartTLS (encrypted, port 389) — Recommended</option>
+                  <option value="ldaps">LDAPS / SSL (encrypted, port 636)</option>
+                </select>
+                {!connForm.use_ssl && !connForm.use_start_tls && (
+                  <p className="text-xs text-amber-600 mt-1">⚠ Without encryption, password operations (create user, reset password) will fail.</p>
+                )}
               </div>
 
               {/* Test result */}
@@ -598,40 +846,40 @@ const ADScanner = () => {
       {/* Summary Cards */}
       {scan && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-blue-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <Users className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">Total AD Users</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.total_users}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">Total AD Users</p>
+              <p className="text-5xl leading-none font-bold text-[#63a8ff]">{scan.total_users}</p>
+            </div>
+            <div className="bg-[#17315a] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <Users className="w-7 h-7 text-[#63a8ff]" />
             </div>
           </div>
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-red-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <AlertTriangle className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">High Risk Accounts</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.high_risk_count}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">High Risk Accounts</p>
+              <p className="text-5xl leading-none font-bold text-[#ff5f5f]">{scan.high_risk_count}</p>
+            </div>
+            <div className="bg-[#3f262c] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <AlertTriangle className="w-7 h-7 text-[#ff5f5f]" />
             </div>
           </div>
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-orange-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <Shield className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">Privileged Accounts</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.privileged_users}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">Privileged Accounts</p>
+              <p className="text-5xl leading-none font-bold text-[#ff962e]">{scan.privileged_users}</p>
+            </div>
+            <div className="bg-[#3a2b24] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <Shield className="w-7 h-7 text-[#ff962e]" />
             </div>
           </div>
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-gray-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <UserX className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">Stale Accounts</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.stale_accounts}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">Stale Accounts</p>
+              <p className="text-5xl leading-none font-bold text-[#b4bfce]">{scan.stale_accounts}</p>
+            </div>
+            <div className="bg-[#353b46] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <UserX className="w-7 h-7 text-[#b4bfce]" />
             </div>
           </div>
         </div>
@@ -639,12 +887,12 @@ const ADScanner = () => {
 
       {/* Tabs */}
       <div className="bg-white rounded-lg shadow-md mb-6">
-        <div className="flex border-b overflow-x-auto">
+        <div className="flex w-full border-b overflow-x-auto">
           {tabs.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-6 py-4 font-semibold transition-colors whitespace-nowrap ${
+              className={`flex-1 min-w-fit px-4 py-4 text-center font-semibold transition-colors whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'text-blue-600 border-b-2 border-blue-600'
                   : 'text-gray-600 hover:text-gray-800'
@@ -676,7 +924,7 @@ const ADScanner = () => {
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-lg font-bold text-gray-800 mb-4">Last Scan Information</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div><span className="text-gray-500">Scan Time:</span><br /><strong>{scan.scan_timestamp}</strong></div>
+              <div><span className="text-gray-500">Scan Time:</span><br /><strong>{formatScanTimestamp(scan.scan_timestamp)}</strong></div>
               <div><span className="text-gray-500">Source:</span><br /><strong className="uppercase">{scan.scan_source}</strong></div>
               <div><span className="text-gray-500">Duration:</span><br /><strong>{scan.scan_duration_ms}ms</strong></div>
               <div><span className="text-gray-500">Enabled/Disabled:</span><br /><strong>{scan.enabled_users} / {scan.disabled_users}</strong></div>
@@ -712,20 +960,6 @@ const ADScanner = () => {
             </table>
           </div>
 
-          {/* Risk Level Distribution */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">Risk Level Distribution</h2>
-            <div className="grid grid-cols-4 gap-4">
-              {['Critical', 'High', 'Medium', 'Low'].map(level => (
-                <div key={level} className="text-center">
-                  <div className={`${RISK_BG[level]} text-white rounded-xl p-4 mb-2`}>
-                    <p className="text-3xl font-bold">{riskLevels[level.toLowerCase()] || 0}</p>
-                  </div>
-                  <p className="text-sm font-semibold text-gray-600">{level}</p>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       )}
 
@@ -751,6 +985,10 @@ const ADScanner = () => {
                 <option value="Medium">Medium</option>
                 <option value="Low">Low</option>
               </select>
+              <button onClick={openCreateUser}
+                className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-lg hover:bg-green-700 transition-colors">
+                <Plus className="w-4 h-4" /> Add User
+              </button>
             </div>
             <div className="mt-2 text-sm text-gray-500">
               Showing {filteredUsers.length} of {users.length} users
@@ -767,6 +1005,7 @@ const ADScanner = () => {
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Last Logon</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Risk</th>
                   <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Flags</th>
+                  <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Actions</th>
                   <th className="w-10"></th>
                 </tr>
               </thead>
@@ -810,13 +1049,25 @@ const ADScanner = () => {
                       <td className="py-3 px-4">
                         <span className="text-sm text-gray-600">{user.risk_flags?.length || 0} flags</span>
                       </td>
+                      <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => openEditUser(user)} title="Edit user"
+                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleDeleteUser(user.sam_account_name)} title="Delete user"
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
                       <td className="py-3 px-4">
                         {expandedUser === idx ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
                       </td>
                     </tr>
                     {expandedUser === idx && (
                       <tr>
-                        <td colSpan={6} className="bg-gray-50 px-6 py-4">
+                        <td colSpan={7} className="bg-gray-50 px-6 py-4">
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                             <div>
                               <p className="text-gray-500">Email</p>
@@ -849,6 +1100,18 @@ const ADScanner = () => {
                                     {group}
                                   </span>
                                 ))}
+                              </div>
+                              <div className="flex gap-2 mt-2">
+                                <button onClick={() => openGroupAssign(user, 'add')}
+                                  className="flex items-center gap-1 text-xs px-3 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors">
+                                  <UserPlus className="w-3 h-3" /> Add to Group
+                                </button>
+                                {(user.member_of || []).length > 0 && (
+                                  <button onClick={() => openGroupAssign(user, 'remove')}
+                                    className="flex items-center gap-1 text-xs px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors">
+                                    <UserMinus className="w-3 h-3" /> Remove from Group
+                                  </button>
+                                )}
                               </div>
                             </div>
                             {user.risk_flags?.length > 0 && (
@@ -897,6 +1160,10 @@ const ADScanner = () => {
                     className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+                <button onClick={() => { setCreateGroupForm({ name: '', scope: 'Global', group_type: 'Security', description: '', ou_dn: '' }); setShowCreateGroupModal(true) }}
+                  className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-lg hover:bg-green-700 transition-colors">
+                  <Plus className="w-4 h-4" /> Add Group
+                </button>
                 <button
                   onClick={fetchAdGroups}
                   disabled={groupsLoading}
@@ -926,6 +1193,7 @@ const ADScanner = () => {
                       <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Scope</th>
                       <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Members</th>
                       <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Description</th>
+                      <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Actions</th>
                       <th className="w-10"></th>
                     </tr>
                   </thead>
@@ -981,6 +1249,18 @@ const ADScanner = () => {
                                 {group.description || <span className="italic text-gray-300">No description</span>}
                               </span>
                             </td>
+                            <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center gap-1">
+                                <button onClick={() => { setEditGroupCn(group.name); setEditGroupForm({ description: group.description || '' }); setShowEditGroupModal(true) }}
+                                  title="Edit group" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDeleteGroup(group.name)}
+                                  title="Delete group" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
                             <td className="py-3 px-4">
                               {expandedGroup === idx
                                 ? <ChevronUp className="w-4 h-4 text-gray-400" />
@@ -989,20 +1269,20 @@ const ADScanner = () => {
                           </tr>
                           {expandedGroup === idx && (
                             <tr>
-                              <td colSpan={6} className="bg-indigo-50 px-8 py-4">
-                                <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Members ({group.members.length})</p>
+                              <td colSpan={7} className="bg-[#242632] border-t border-[#2b2d38] px-8 py-4">
+                                <p className="text-xs font-semibold text-[#9aa5ba] uppercase mb-3">Members ({group.members.length})</p>
                                 {group.members.length > 0 ? (
                                   <div className="flex flex-wrap gap-2">
                                     {group.members.map((m, mi) => (
-                                      <span key={mi} className="px-3 py-1 text-xs font-medium bg-white border border-indigo-200 text-indigo-800 rounded-full">
+                                      <span key={mi} className="px-3 py-1 text-xs font-medium bg-[#1e1f28] border border-[#3c4260] text-[#c9d7ff] rounded-full">
                                         {m}
                                       </span>
                                     ))}
                                   </div>
                                 ) : (
-                                  <p className="text-sm text-gray-400 italic">No members</p>
+                                  <p className="text-sm text-[#8b96ad] italic">No members</p>
                                 )}
-                                <p className="text-xs text-gray-400 mt-3 font-mono truncate">{group.dn}</p>
+                                <p className="text-xs text-[#8794ae] mt-3 font-mono truncate">{group.dn}</p>
                               </td>
                             </tr>
                           )}
@@ -1033,6 +1313,10 @@ const ADScanner = () => {
                 value={ouSearch} onChange={e => setOuSearch(e.target.value)}
                 className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
+            <button onClick={() => { setOuForm({ name: '', description: '', parent_dn: '' }); setShowOuModal(true) }}
+              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-lg hover:bg-green-700 transition-colors">
+              <Plus className="w-4 h-4" /> Add OU
+            </button>
             <button onClick={fetchOus} disabled={ousLoading}
               className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors">
               <RefreshCw className={`w-4 h-4 ${ousLoading ? 'animate-spin' : ''}`} /> Refresh
@@ -1061,6 +1345,7 @@ const ADScanner = () => {
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Description</th>
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Managed By</th>
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Created</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -1080,6 +1365,18 @@ const ADScanner = () => {
                         <td className="py-3 px-4 text-sm text-gray-500">{ou.description || <span className="italic text-gray-300">None</span>}</td>
                         <td className="py-3 px-4 text-sm text-gray-600">{ou.managed_by || <span className="italic text-gray-300">None</span>}</td>
                         <td className="py-3 px-4 text-sm text-gray-500">{ou.created ? ou.created.replace('T', ' ') : '—'}</td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => { setEditOuDn(ou.dn); setEditOuForm({ description: ou.description || '' }); setShowEditOuModal(true) }}
+                              title="Edit OU" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => handleDeleteOu(ou.dn, ou.name)}
+                              title="Delete OU" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                 </tbody>
@@ -1114,6 +1411,10 @@ const ADScanner = () => {
               <option value="Enabled">Enabled</option>
               <option value="Disabled">Disabled</option>
             </select>
+            <button onClick={() => { setComputerForm({ name: '', ou_dn: '', description: '' }); setShowComputerModal(true) }}
+              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-lg hover:bg-green-700 transition-colors">
+              <Plus className="w-4 h-4" /> Add Computer
+            </button>
             <button onClick={fetchComputers} disabled={computersLoading}
               className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors">
               <RefreshCw className={`w-4 h-4 ${computersLoading ? 'animate-spin' : ''}`} /> Refresh
@@ -1148,6 +1449,7 @@ const ADScanner = () => {
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Last Seen</th>
                     <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Description</th>
+                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -1183,6 +1485,18 @@ const ADScanner = () => {
                         </td>
                         <td className="py-3 px-4 text-sm text-gray-600">{c.last_logon || 'Never'}</td>
                         <td className="py-3 px-4 text-sm text-gray-500">{c.description || <span className="italic text-gray-300">None</span>}</td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => { setEditComputerCn(c.name); setEditComputerForm({ description: c.description || '', enabled: c.enabled }); setShowEditComputerModal(true) }}
+                              title="Edit computer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => handleDeleteComputer(c.name)}
+                              title="Delete computer" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                 </tbody>
@@ -1289,7 +1603,7 @@ const ADScanner = () => {
             <p className="text-sm text-gray-500 mb-4">Users who are members of high-privilege groups</p>
             <div className="space-y-3">
               {users.filter(u => u.is_privileged).map((user, idx) => (
-                <div key={idx} className="flex items-center justify-between bg-red-50 border border-red-200 rounded-lg p-4">
+                <div key={idx} className="flex items-center justify-between bg-[#252833] border border-[#343847] rounded-lg p-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center text-white font-semibold">
                       {user.display_name?.charAt(0)?.toUpperCase()}
@@ -1325,7 +1639,7 @@ const ADScanner = () => {
             <p className="text-sm text-gray-500 mb-4">Disabled accounts still in privileged groups</p>
             <div className="space-y-3">
               {users.filter(u => u.is_orphaned).map((user, idx) => (
-                <div key={idx} className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div key={idx} className="flex items-center justify-between bg-[#252833] border border-[#343847] rounded-lg p-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-gray-400 rounded-full flex items-center justify-center text-white font-semibold">
                       {user.display_name?.charAt(0)?.toUpperCase()}
@@ -1389,17 +1703,17 @@ const ADScanner = () => {
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-lg font-bold text-gray-800 mb-4">Weak Configurations</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+              <div className="bg-[#252833] border border-[#343847] rounded-lg p-4">
                 <div className="flex justify-between items-center">
                   <p className="font-semibold text-gray-800">Password Never Expires</p>
-                  <span className="text-2xl font-bold text-orange-600">{scan.password_never_expires}</span>
+                  <span className="text-2xl font-bold text-[#ff962e]">{scan.password_never_expires}</span>
                 </div>
                 <p className="text-sm text-gray-500 mt-1">Accounts with non-expiring passwords violate security best practices</p>
               </div>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="bg-[#252833] border border-[#343847] rounded-lg p-4">
                 <div className="flex justify-between items-center">
                   <p className="font-semibold text-gray-800">Blank Descriptions</p>
-                  <span className="text-2xl font-bold text-yellow-600">
+                  <span className="text-2xl font-bold text-[#e3b50a]">
                     {users.filter(u => !u.description?.trim()).length}
                   </span>
                 </div>
@@ -1471,45 +1785,354 @@ const ADScanner = () => {
         </div>
       )}
 
-      {/* ─── Scan History Tab ─── */}
-      {activeTab === 'history' && (
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-bold text-gray-800 mb-4">Scan History</h2>
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">ID</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Timestamp</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Source</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Users</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Privileged</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">High Risk</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Stale</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Duration</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {scanHistory.map(s => (
-                <tr key={s.id} className="hover:bg-gray-50">
-                  <td className="py-3 px-4 font-medium">{s.id}</td>
-                  <td className="py-3 px-4 text-sm">{s.scan_timestamp}</td>
-                  <td className="py-3 px-4">
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      s.scan_source === 'ldap' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                    }`}>{s.scan_source.toUpperCase()}</span>
-                  </td>
-                  <td className="py-3 px-4">{s.total_users}</td>
-                  <td className="py-3 px-4 text-red-600 font-semibold">{s.privileged_users}</td>
-                  <td className="py-3 px-4 text-orange-600 font-semibold">{s.high_risk_count}</td>
-                  <td className="py-3 px-4">{s.stale_accounts}</td>
-                  <td className="py-3 px-4 text-sm text-gray-500">{s.scan_duration_ms}ms</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {scanHistory.length === 0 && (
-            <p className="text-gray-500 text-center py-8">No scans performed yet</p>
-          )}
+      {/* ═══ Create / Edit User Modal ═══ */}
+      {showUserModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">{userModalMode === 'create' ? 'New User' : 'Edit User'}</h2>
+              <button onClick={() => setShowUserModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleSaveUser} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              {userModalMode === 'create' && (
+                <>
+                  <div className="grid grid-cols-5 gap-3">
+                    <div className="col-span-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">First name *</label>
+                      <input type="text" required value={userForm.first_name} onChange={e => setUserForm({...userForm, first_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                    <div className="col-span-1">
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Initials</label>
+                      <input type="text" value={userForm.initials} onChange={e => setUserForm({...userForm, initials: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Last name</label>
+                      <input type="text" value={userForm.last_name} onChange={e => setUserForm({...userForm, last_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Full name</label>
+                    <input type="text" value={userForm.full_name || `${userForm.first_name} ${userForm.last_name}`.trim()}
+                      onChange={e => setUserForm({...userForm, full_name: e.target.value})}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name *</label>
+                      <input type="text" required value={userForm.sam_account_name} onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">@domain</label>
+                      <input type="text" value={userForm.upn_suffix} onChange={e => setUserForm({...userForm, upn_suffix: e.target.value})}
+                        placeholder={connection?.config?.domain || 'mylab.local'}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Password *</label>
+                    <input type="password" required value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  </div>
+                </>
+              )}
+              {userModalMode === 'edit' && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">First name</label>
+                      <input type="text" value={userForm.first_name} onChange={e => setUserForm({...userForm, first_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Last name</label>
+                      <input type="text" value={userForm.last_name} onChange={e => setUserForm({...userForm, last_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Display name</label>
+                    <input type="text" value={userForm.full_name} onChange={e => setUserForm({...userForm, full_name: e.target.value})}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  </div>
+                </>
+              )}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={userForm.description} onChange={e => setUserForm({...userForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="flex items-center gap-6">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={userForm.enabled} onChange={e => setUserForm({...userForm, enabled: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                  <span className="text-sm font-medium text-gray-700">Account Enabled</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={userForm.password_never_expires} onChange={e => setUserForm({...userForm, password_never_expires: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                  <span className="text-sm font-medium text-gray-700">Password never expires</span>
+                </label>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowUserModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
+                  {userModalMode === 'create' ? 'Create User' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Group Assign/Remove Modal ═══ */}
+      {showGroupAssignModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className={`px-6 py-4 text-white ${groupAssignAction === 'add' ? 'bg-gradient-to-r from-green-600 to-emerald-600' : 'bg-gradient-to-r from-red-600 to-rose-600'}`}>
+              <h2 className="text-lg font-bold">{groupAssignAction === 'add' ? 'Add to Group' : 'Remove from Group'}</h2>
+              <p className="text-sm opacity-80">User: {groupAssignUser?.display_name}</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Select Group</label>
+                <select value={selectedGroupDn} onChange={e => setSelectedGroupDn(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                  <option value="">-- Select a group --</option>
+                  {(groupAssignAction === 'remove'
+                    ? adGroups.filter(g => (groupAssignUser?.member_of || []).includes(g.name))
+                    : adGroups
+                  ).map((g, i) => (
+                    <option key={i} value={g.dn}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button onClick={() => setShowGroupAssignModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button onClick={handleGroupAssign} disabled={!selectedGroupDn}
+                  className={`px-5 py-2 text-white rounded-lg font-medium disabled:opacity-50 ${groupAssignAction === 'add' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}>
+                  {groupAssignAction === 'add' ? 'Add to Group' : 'Remove from Group'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Create Group Modal ═══ */}
+      {showCreateGroupModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">New Group</h2>
+              <button onClick={() => setShowCreateGroupModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleCreateGroup} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Group name *</label>
+                <input type="text" required value={createGroupForm.name} onChange={e => setCreateGroupForm({...createGroupForm, name: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Group scope</label>
+                  <div className="space-y-1">
+                    {['DomainLocal', 'Global', 'Universal'].map(s => (
+                      <label key={s} className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="scope" value={s} checked={createGroupForm.scope === s}
+                          onChange={e => setCreateGroupForm({...createGroupForm, scope: e.target.value})}
+                          className="text-blue-600 focus:ring-blue-500" />
+                        <span className="text-sm text-gray-700">{s === 'DomainLocal' ? 'Domain local' : s}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Group type</label>
+                  <div className="space-y-1">
+                    {['Security', 'Distribution'].map(t => (
+                      <label key={t} className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="gtype" value={t} checked={createGroupForm.group_type === t}
+                          onChange={e => setCreateGroupForm({...createGroupForm, group_type: e.target.value})}
+                          className="text-blue-600 focus:ring-blue-500" />
+                        <span className="text-sm text-gray-700">{t}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={createGroupForm.description} onChange={e => setCreateGroupForm({...createGroupForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowCreateGroupModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Edit Group Modal ═══ */}
+      {showEditGroupModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">Edit Group: {editGroupCn}</h2>
+              <button onClick={() => setShowEditGroupModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleUpdateGroup} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={editGroupForm.description} onChange={e => setEditGroupForm({...editGroupForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowEditGroupModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Create OU Modal ═══ */}
+      {showOuModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">New Organizational Unit</h2>
+              <button onClick={() => setShowOuModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleCreateOu} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Name *</label>
+                <input type="text" required value={ouForm.name} onChange={e => setOuForm({...ouForm, name: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={ouForm.description} onChange={e => setOuForm({...ouForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Parent OU (optional)</label>
+                <select value={ouForm.parent_dn} onChange={e => setOuForm({...ouForm, parent_dn: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                  <option value="">Root (Domain)</option>
+                  {ous.map((o, i) => (
+                    <option key={i} value={o.dn}>{o.name} ({o.path})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowOuModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Edit OU Modal ═══ */}
+      {showEditOuModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">Edit OU</h2>
+              <button onClick={() => setShowEditOuModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleUpdateOu} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={editOuForm.description} onChange={e => setEditOuForm({...editOuForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowEditOuModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Create Computer Modal ═══ */}
+      {showComputerModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">New Computer</h2>
+              <button onClick={() => setShowComputerModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleCreateComputer} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Computer name *</label>
+                <input type="text" required value={computerForm.name} onChange={e => setComputerForm({...computerForm, name: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Target OU (optional)</label>
+                <select value={computerForm.ou_dn} onChange={e => setComputerForm({...computerForm, ou_dn: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                  <option value="">Default (CN=Computers)</option>
+                  {ous.map((o, i) => (
+                    <option key={i} value={o.dn}>{o.name} ({o.path})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={computerForm.description} onChange={e => setComputerForm({...computerForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowComputerModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Edit Computer Modal ═══ */}
+      {showEditComputerModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">Edit Computer: {editComputerCn}</h2>
+              <button onClick={() => setShowEditComputerModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleUpdateComputer} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <input type="text" value={editComputerForm.description} onChange={e => setEditComputerForm({...editComputerForm, description: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editComputerForm.enabled} onChange={e => setEditComputerForm({...editComputerForm, enabled: e.target.checked})}
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                  <span className="text-sm font-medium text-gray-700">Enabled</span>
+                </label>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowEditComputerModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Save</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

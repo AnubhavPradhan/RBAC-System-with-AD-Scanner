@@ -21,6 +21,7 @@ class ADConnectRequest(BaseModel):
     server: str
     port: int = 389
     use_ssl: bool = False
+    use_start_tls: bool = False
     base_dn: str
     bind_user: str
     bind_password: str
@@ -39,6 +40,7 @@ def get_connection(current_user: User = Depends(get_current_user), db: Session =
             "server": cfg.server,
             "port": cfg.port,
             "use_ssl": cfg.use_ssl,
+            "use_start_tls": cfg.use_start_tls,
             "base_dn": cfg.base_dn,
             "bind_user": cfg.bind_user,
             "domain": cfg.domain,
@@ -54,9 +56,7 @@ def test_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
         from ldap3 import Server, Connection, ALL, Tls
         import ssl as ssl_mod
 
-        tls_config = None
-        if body.use_ssl:
-            tls_config = Tls(validate=ssl_mod.CERT_NONE)
+        tls_config = Tls(validate=ssl_mod.CERT_NONE, version=ssl_mod.PROTOCOL_TLS) if (body.use_ssl or body.use_start_tls) else None
 
         server = Server(
             body.server,
@@ -66,18 +66,21 @@ def test_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             get_info=ALL,
             connect_timeout=10,
         )
+
+        auto = 'TLS_BEFORE_BIND' if (body.use_start_tls and not body.use_ssl) else True
         conn = Connection(
             server,
             user=body.bind_user,
             password=body.bind_password,
-            auto_bind=True,
+            auto_bind=auto,
             receive_timeout=10,
         )
+        enc = 'StartTLS' if body.use_start_tls else ('SSL' if body.use_ssl else 'plain')
         info = server.info
         conn.unbind()
         return {
             "success": True,
-            "message": f"Successfully connected to {body.server}:{body.port}",
+            "message": f"Successfully connected to {body.server}:{body.port} ({enc})",
             "server_info": str(info.naming_contexts) if info else None,
         }
     except Exception as e:
@@ -92,9 +95,7 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
         from ldap3 import Server, Connection, ALL, Tls
         import ssl as ssl_mod
 
-        tls_config = None
-        if body.use_ssl:
-            tls_config = Tls(validate=ssl_mod.CERT_NONE)
+        tls_config = Tls(validate=ssl_mod.CERT_NONE, version=ssl_mod.PROTOCOL_TLS) if (body.use_ssl or body.use_start_tls) else None
 
         server = Server(
             body.server,
@@ -104,11 +105,13 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             get_info=ALL,
             connect_timeout=10,
         )
+
+        auto = 'TLS_BEFORE_BIND' if (body.use_start_tls and not body.use_ssl) else True
         conn = Connection(
             server,
             user=body.bind_user,
             password=body.bind_password,
-            auto_bind=True,
+            auto_bind=auto,
             receive_timeout=10,
         )
         conn.unbind()
@@ -123,6 +126,7 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
         cfg.server = body.server
         cfg.port = body.port
         cfg.use_ssl = body.use_ssl
+        cfg.use_start_tls = body.use_start_tls
         cfg.base_dn = body.base_dn
         cfg.bind_user = body.bind_user
         cfg.bind_password = body.bind_password
@@ -133,6 +137,7 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             server=body.server,
             port=body.port,
             use_ssl=body.use_ssl,
+            use_start_tls=body.use_start_tls,
             base_dn=body.base_dn,
             bind_user=body.bind_user,
             bind_password=body.bind_password,
@@ -141,14 +146,15 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
         )
         db.add(cfg)
 
+    enc = 'StartTLS' if body.use_start_tls else ('SSL' if body.use_ssl else 'LDAP')
     db.add(AuditLog(
         user_email=current_user.email, action="AD Connect", resource="AD Scanner",
-        details=f"Connected to AD server {body.server}:{body.port} ({'SSL' if body.use_ssl else 'LDAP'})",
+        details=f"Connected to AD server {body.server}:{body.port} ({enc})",
         severity="Info",
     ))
     db.commit()
 
-    return {"success": True, "connected": True, "message": f"Connected to {body.server}:{body.port}"}
+    return {"success": True, "connected": True, "message": f"Connected to {body.server}:{body.port} ({enc})"}
 
 
 @router.post("/disconnect")
@@ -945,3 +951,649 @@ def list_domain_controllers(current_user: User = Depends(get_current_user), db: 
 
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch DCs: {str(e)}")
+
+
+# ══════════════════════════════════════════
+# HELPER: get a bound LDAP connection
+# ══════════════════════════════════════════
+def _get_ldap_conn(db: Session):
+    """Return (conn, cfg) or raise 400."""
+    cfg = db.query(ADConnectionConfig).first()
+    if not cfg or not cfg.is_connected:
+        raise HTTPException(400, "No active AD connection.")
+    from ldap3 import Server, Connection, ALL, Tls
+    import ssl as ssl_mod
+    tls_config = Tls(validate=ssl_mod.CERT_NONE, version=ssl_mod.PROTOCOL_TLS) if (cfg.use_ssl or cfg.use_start_tls) else None
+    server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
+    auto = 'TLS_BEFORE_BIND' if (cfg.use_start_tls and not cfg.use_ssl) else True
+    conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=auto, receive_timeout=15)
+    return conn, cfg
+
+
+# ──────────────────────────────────────────
+# 12. AD User CRUD
+# ──────────────────────────────────────────
+class ADUserCreateRequest(BaseModel):
+    first_name: str
+    last_name: str = ""
+    initials: str = ""
+    full_name: str = ""
+    sam_account_name: str
+    upn_suffix: str = ""
+    password: str
+    description: str = ""
+    enabled: bool = True
+    password_never_expires: bool = False
+    ou_dn: str = ""  # target OU DN; empty → CN=Users
+
+
+class ADUserUpdateRequest(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    initials: Optional[str] = None
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    description: Optional[str] = None
+    enabled: Optional[bool] = None
+    password_never_expires: Optional[bool] = None
+
+
+class ADUserGroupRequest(BaseModel):
+    group_dn: str
+
+
+@router.post("/users")
+def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Create a new user in Active Directory."""
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import MODIFY_REPLACE
+        display = body.full_name or f"{body.first_name} {body.last_name}".strip() or body.sam_account_name
+        container = body.ou_dn if body.ou_dn else f"CN=Users,{cfg.base_dn}"
+        user_dn = f"CN={display},{container}"
+        upn_suffix = body.upn_suffix or cfg.domain or "mylab.local"
+
+        attrs = {
+            "objectClass": ["top", "person", "organizationalPerson", "user"],
+            "cn": display,
+            "sAMAccountName": body.sam_account_name,
+            "userPrincipalName": f"{body.sam_account_name}@{upn_suffix}",
+            "displayName": display,
+            "givenName": body.first_name,
+            "userAccountControl": 544,  # normal + password not required (temp)
+        }
+        if body.last_name:
+            attrs["sn"] = body.last_name
+        if body.initials:
+            attrs["initials"] = body.initials
+        if body.description:
+            attrs["description"] = body.description
+
+        ok = conn.add(user_dn, attributes=attrs)
+        if not ok:
+            raise HTTPException(400, f"Failed to create user: {conn.result.get('description', conn.result)}")
+
+        # Set password (requires LDAPS or StartTLS — AD rejects unicodePwd over plain LDAP)
+        pwd_quoted = f'"{body.password}"'
+        encoded_pwd = pwd_quoted.encode("utf-16-le")
+        pwd_ok = conn.modify(user_dn, {"unicodePwd": [(MODIFY_REPLACE, [encoded_pwd])]})
+        if not pwd_ok:
+            pwd_err = conn.result.get('description', conn.result)
+            # Clean up the user so we don't leave an account with no password
+            conn.delete(user_dn)
+            hint = ""
+            if not cfg.use_ssl and not cfg.use_start_tls:
+                hint = " Hint: Password changes require an encrypted connection. Enable StartTLS (recommended) or LDAPS in AD connection settings."
+            raise HTTPException(400, f"Failed to set password: {pwd_err}.{hint}")
+
+        # Build UAC
+        uac = 512  # NORMAL_ACCOUNT
+        if not body.enabled:
+            uac |= 0x0002
+        if body.password_never_expires:
+            uac |= 0x10000
+        conn.modify(user_dn, {"userAccountControl": [(MODIFY_REPLACE, [str(uac)])]})
+
+        # Clear "User must change password at next logon" so the account can log in immediately
+        conn.modify(user_dn, {"pwdLastSet": [(MODIFY_REPLACE, ["-1"])]})
+
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Create", resource="AD User",
+                        details=f"Created AD user '{body.sam_account_name}'", severity="Info"))
+        db.commit()
+        return {"success": True, "message": f"User '{body.sam_account_name}' created", "dn": user_dn}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Create user failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+@router.put("/users/{sam_account_name}")
+def update_ad_user(sam_account_name: str, body: ADUserUpdateRequest,
+                   current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Update an existing AD user's attributes."""
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE, MODIFY_REPLACE
+        conn.search(cfg.base_dn, f"(&(objectClass=user)(sAMAccountName={sam_account_name}))",
+                     search_scope=SUBTREE, attributes=["distinguishedName", "userAccountControl"])
+        if not conn.entries:
+            raise HTTPException(404, f"User '{sam_account_name}' not found in AD")
+        user_dn = str(conn.entries[0].distinguishedName)
+        current_uac = int(str(conn.entries[0].userAccountControl)) if conn.entries[0].userAccountControl else 512
+
+        changes = {}
+        if body.first_name is not None:
+            changes["givenName"] = [(MODIFY_REPLACE, [body.first_name])]
+        if body.last_name is not None:
+            changes["sn"] = [(MODIFY_REPLACE, [body.last_name])]
+        if body.initials is not None:
+            changes["initials"] = [(MODIFY_REPLACE, [body.initials])]
+        if body.display_name is not None:
+            changes["displayName"] = [(MODIFY_REPLACE, [body.display_name])]
+        if body.email is not None:
+            changes["mail"] = [(MODIFY_REPLACE, [body.email])]
+        if body.description is not None:
+            changes["description"] = [(MODIFY_REPLACE, [body.description])]
+
+        # UAC changes
+        if body.enabled is not None or body.password_never_expires is not None:
+            uac = current_uac
+            if body.enabled is not None:
+                if body.enabled:
+                    uac &= ~0x0002
+                else:
+                    uac |= 0x0002
+            if body.password_never_expires is not None:
+                if body.password_never_expires:
+                    uac |= 0x10000
+                else:
+                    uac &= ~0x10000
+            changes["userAccountControl"] = [(MODIFY_REPLACE, [str(uac)])]
+
+        if changes:
+            ok = conn.modify(user_dn, changes)
+            if not ok:
+                raise HTTPException(400, f"Update failed: {conn.result.get('description', conn.result)}")
+
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD User",
+                        details=f"Updated AD user '{sam_account_name}'", severity="Info"))
+        db.commit()
+        return {"success": True, "message": f"User '{sam_account_name}' updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Update user failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+@router.delete("/users/{sam_account_name}")
+def delete_ad_user(sam_account_name: str,
+                   current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Delete a user from Active Directory."""
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE
+        conn.search(cfg.base_dn, f"(&(objectClass=user)(sAMAccountName={sam_account_name}))",
+                     search_scope=SUBTREE, attributes=["distinguishedName"])
+        if not conn.entries:
+            raise HTTPException(404, f"User '{sam_account_name}' not found")
+        user_dn = str(conn.entries[0].distinguishedName)
+        ok = conn.delete(user_dn)
+        if not ok:
+            raise HTTPException(400, f"Delete failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Delete", resource="AD User",
+                        details=f"Deleted AD user '{sam_account_name}'", severity="Warning"))
+        db.commit()
+        return {"success": True, "message": f"User '{sam_account_name}' deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Delete user failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+@router.post("/users/{sam_account_name}/add-to-group")
+def add_user_to_group(sam_account_name: str, body: ADUserGroupRequest,
+                      current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE, MODIFY_ADD
+        conn.search(cfg.base_dn, f"(&(objectClass=user)(sAMAccountName={sam_account_name}))",
+                     search_scope=SUBTREE, attributes=["distinguishedName"])
+        if not conn.entries:
+            raise HTTPException(404, "User not found")
+        user_dn = str(conn.entries[0].distinguishedName)
+        ok = conn.modify(body.group_dn, {"member": [(MODIFY_ADD, [user_dn])]})
+        if not ok:
+            raise HTTPException(400, f"Failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD User",
+                        details=f"Added '{sam_account_name}' to group", severity="Info"))
+        db.commit()
+        return {"success": True, "message": "User added to group"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+@router.post("/users/{sam_account_name}/remove-from-group")
+def remove_user_from_group(sam_account_name: str, body: ADUserGroupRequest,
+                           current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE, MODIFY_DELETE
+        conn.search(cfg.base_dn, f"(&(objectClass=user)(sAMAccountName={sam_account_name}))",
+                     search_scope=SUBTREE, attributes=["distinguishedName"])
+        if not conn.entries:
+            raise HTTPException(404, "User not found")
+        user_dn = str(conn.entries[0].distinguishedName)
+        ok = conn.modify(body.group_dn, {"member": [(MODIFY_DELETE, [user_dn])]})
+        if not ok:
+            raise HTTPException(400, f"Failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD User",
+                        details=f"Removed '{sam_account_name}' from group", severity="Info"))
+        db.commit()
+        return {"success": True, "message": "User removed from group"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+# ──────────────────────────────────────────
+# 13. AD Group CRUD
+# ──────────────────────────────────────────
+class ADGroupCreateRequest(BaseModel):
+    name: str
+    scope: str = "Global"       # Global, Universal, DomainLocal
+    group_type: str = "Security" # Security, Distribution
+    description: str = ""
+    ou_dn: str = ""
+
+
+class ADGroupUpdateRequest(BaseModel):
+    description: Optional[str] = None
+
+
+@router.post("/groups/create")
+def create_ad_group(body: ADGroupCreateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        container = body.ou_dn if body.ou_dn else f"CN=Users,{cfg.base_dn}"
+        group_dn = f"CN={body.name},{container}"
+
+        # groupType calculation
+        scope_val = {"Global": 0x00000002, "Universal": 0x00000004, "DomainLocal": 0x00000004}.get(body.scope, 0x00000002)
+        if body.scope == "DomainLocal":
+            scope_val = 0x00000004  # domain local uses 4 as well in some representations
+            # Actually DomainLocal = 4, Universal = 8... let me use standard values
+            # ADS_GROUP_TYPE: Global=2, DomainLocal=4, Universal=8
+            scope_val = 0x00000004
+        if body.scope == "Universal":
+            scope_val = 0x00000008
+        type_flag = -2147483648 if body.group_type == "Security" else 0  # 0x80000000 for security
+        group_type_val = scope_val | type_flag if body.group_type == "Security" else scope_val
+
+        attrs = {
+            "objectClass": ["top", "group"],
+            "cn": body.name,
+            "sAMAccountName": body.name,
+            "groupType": str(group_type_val),
+        }
+        if body.description:
+            attrs["description"] = body.description
+
+        ok = conn.add(group_dn, attributes=attrs)
+        if not ok:
+            raise HTTPException(400, f"Failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Create", resource="AD Group",
+                        details=f"Created AD group '{body.name}'", severity="Info"))
+        db.commit()
+        return {"success": True, "message": f"Group '{body.name}' created", "dn": group_dn}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Create group failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+@router.put("/groups/{group_cn}")
+def update_ad_group(group_cn: str, body: ADGroupUpdateRequest,
+                    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE, MODIFY_REPLACE
+        conn.search(cfg.base_dn, f"(&(objectClass=group)(cn={group_cn}))",
+                     search_scope=SUBTREE, attributes=["distinguishedName"])
+        if not conn.entries:
+            raise HTTPException(404, "Group not found")
+        group_dn = str(conn.entries[0].distinguishedName)
+        changes = {}
+        if body.description is not None:
+            changes["description"] = [(MODIFY_REPLACE, [body.description])]
+        if changes:
+            ok = conn.modify(group_dn, changes)
+            if not ok:
+                raise HTTPException(400, f"Update failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD Group",
+                        details=f"Updated AD group '{group_cn}'", severity="Info"))
+        db.commit()
+        return {"success": True, "message": f"Group '{group_cn}' updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Update group failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+@router.delete("/groups/{group_cn}")
+def delete_ad_group(group_cn: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE
+        conn.search(cfg.base_dn, f"(&(objectClass=group)(cn={group_cn}))",
+                     search_scope=SUBTREE, attributes=["distinguishedName"])
+        if not conn.entries:
+            raise HTTPException(404, "Group not found")
+        group_dn = str(conn.entries[0].distinguishedName)
+        ok = conn.delete(group_dn)
+        if not ok:
+            raise HTTPException(400, f"Delete failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Delete", resource="AD Group",
+                        details=f"Deleted AD group '{group_cn}'", severity="Warning"))
+        db.commit()
+        return {"success": True, "message": f"Group '{group_cn}' deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Delete group failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+# ──────────────────────────────────────────
+# 14. OU CRUD
+# ──────────────────────────────────────────
+class OUCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    parent_dn: str = ""  # empty → create under base_dn
+
+
+class OUUpdateRequest(BaseModel):
+    description: Optional[str] = None
+
+
+@router.post("/ous/create")
+def create_ou(body: OUCreateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        parent = body.parent_dn if body.parent_dn else cfg.base_dn
+        ou_dn = f"OU={body.name},{parent}"
+        attrs = {"objectClass": ["top", "organizationalUnit"], "ou": body.name}
+        if body.description:
+            attrs["description"] = body.description
+        ok = conn.add(ou_dn, attributes=attrs)
+        if not ok:
+            raise HTTPException(400, f"Failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Create", resource="AD OU",
+                        details=f"Created OU '{body.name}'", severity="Info"))
+        db.commit()
+        return {"success": True, "message": f"OU '{body.name}' created", "dn": ou_dn}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Create OU failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+@router.put("/ous/update")
+def update_ou(dn: str = Query(...), description: str = Query(""),
+              current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import MODIFY_REPLACE
+        changes = {"description": [(MODIFY_REPLACE, [description])]}
+        ok = conn.modify(dn, changes)
+        if not ok:
+            raise HTTPException(400, f"Update failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD OU",
+                        details=f"Updated OU '{dn}'", severity="Info"))
+        db.commit()
+        return {"success": True, "message": "OU updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Update OU failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+@router.delete("/ous/delete")
+def delete_ou(dn: str = Query(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE
+        # Check if OU has children
+        conn.search(dn, "(objectClass=*)", search_scope=SUBTREE, attributes=["distinguishedName"])
+        children = [e for e in conn.entries if str(e.distinguishedName) != dn]
+        if children:
+            raise HTTPException(400, f"OU is not empty ({len(children)} objects inside). Move or delete them first.")
+        ok = conn.delete(dn)
+        if not ok:
+            raise HTTPException(400, f"Delete failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Delete", resource="AD OU",
+                        details=f"Deleted OU '{dn}'", severity="Warning"))
+        db.commit()
+        return {"success": True, "message": "OU deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Delete OU failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+# ──────────────────────────────────────────
+# 15. Computer CRUD
+# ──────────────────────────────────────────
+class ComputerCreateRequest(BaseModel):
+    name: str
+    ou_dn: str = ""  # target OU; empty → CN=Computers
+    description: str = ""
+
+
+class ComputerUpdateRequest(BaseModel):
+    description: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+@router.post("/computers/create")
+def create_computer(body: ComputerCreateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        container = body.ou_dn if body.ou_dn else f"CN=Computers,{cfg.base_dn}"
+        comp_dn = f"CN={body.name},{container}"
+        sam = body.name.upper()
+        if not sam.endswith("$"):
+            sam += "$"
+
+        attrs = {
+            "objectClass": ["top", "person", "organizationalPerson", "user", "computer"],
+            "cn": body.name,
+            "sAMAccountName": sam,
+            "userAccountControl": "4096",  # WORKSTATION_TRUST_ACCOUNT
+        }
+        if body.description:
+            attrs["description"] = body.description
+
+        ok = conn.add(comp_dn, attributes=attrs)
+        if not ok:
+            raise HTTPException(400, f"Failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Create", resource="AD Computer",
+                        details=f"Created computer '{body.name}'", severity="Info"))
+        db.commit()
+        return {"success": True, "message": f"Computer '{body.name}' created", "dn": comp_dn}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Create computer failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+@router.put("/computers/{comp_cn}")
+def update_computer(comp_cn: str, body: ComputerUpdateRequest,
+                    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE, MODIFY_REPLACE
+        conn.search(cfg.base_dn, f"(&(objectClass=computer)(cn={comp_cn}))",
+                     search_scope=SUBTREE, attributes=["distinguishedName", "userAccountControl"])
+        if not conn.entries:
+            raise HTTPException(404, "Computer not found")
+        comp_dn = str(conn.entries[0].distinguishedName)
+        changes = {}
+        if body.description is not None:
+            changes["description"] = [(MODIFY_REPLACE, [body.description])]
+        if body.enabled is not None:
+            uac = int(str(conn.entries[0].userAccountControl)) if conn.entries[0].userAccountControl else 4096
+            if body.enabled:
+                uac &= ~0x0002
+            else:
+                uac |= 0x0002
+            changes["userAccountControl"] = [(MODIFY_REPLACE, [str(uac)])]
+        if changes:
+            ok = conn.modify(comp_dn, changes)
+            if not ok:
+                raise HTTPException(400, f"Update failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD Computer",
+                        details=f"Updated computer '{comp_cn}'", severity="Info"))
+        db.commit()
+        return {"success": True, "message": f"Computer '{comp_cn}' updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Update computer failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+@router.delete("/computers/{comp_cn}")
+def delete_computer(comp_cn: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE
+        conn.search(cfg.base_dn, f"(&(objectClass=computer)(cn={comp_cn}))",
+                     search_scope=SUBTREE, attributes=["distinguishedName"])
+        if not conn.entries:
+            raise HTTPException(404, "Computer not found")
+        comp_dn = str(conn.entries[0].distinguishedName)
+        ok = conn.delete(comp_dn)
+        if not ok:
+            raise HTTPException(400, f"Delete failed: {conn.result.get('description', conn.result)}")
+        conn.unbind()
+        db.add(AuditLog(user_email=current_user.email, action="Delete", resource="AD Computer",
+                        details=f"Deleted computer '{comp_cn}'", severity="Warning"))
+        db.commit()
+        return {"success": True, "message": f"Computer '{comp_cn}' deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Delete computer failed: {e}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass

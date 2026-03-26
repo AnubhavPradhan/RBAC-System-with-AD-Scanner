@@ -8,6 +8,8 @@ const Roles = () => {
   const [roles, setRoles] = useState([])
   const [availablePermissions, setAvailablePermissions] = useState([])
   const [loading, setLoading] = useState(true)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [roleToDelete, setRoleToDelete] = useState(null)
 
   const [formData, setFormData] = useState({
     name: '',
@@ -82,11 +84,18 @@ const Roles = () => {
     setShowModal(true)
   }
 
-  const handleDeleteRole = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this role?')) return
+  const handleDeleteRole = (role) => {
+    setRoleToDelete(role)
+    setShowDeleteConfirm(true)
+  }
+
+  const confirmDeleteRole = async () => {
+    if (!roleToDelete) return
     try {
-      await api.delete(`/roles/${id}`)
-      setRoles(roles.filter(r => r.id !== id))
+      await api.delete(`/roles/${roleToDelete.id}`)
+      setRoles(roles.filter(r => r.id !== roleToDelete.id))
+      setShowDeleteConfirm(false)
+      setRoleToDelete(null)
     } catch (err) {
       alert(err.response?.data?.error || 'Delete failed')
     }
@@ -95,7 +104,7 @@ const Roles = () => {
   return (
     <div>
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800">Roles Management</h1>
+        <h1 className="text-3xl font-bold text-blue-100">Roles Management</h1>
         <button
           onClick={handleAddNew}
           className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
@@ -122,7 +131,7 @@ const Roles = () => {
                   <Pencil className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => handleDeleteRole(role.id)}
+                  onClick={() => handleDeleteRole(role)}
                   className="text-red-500 hover:text-red-700 transition-colors"
                   title="Delete"
                 >
@@ -217,6 +226,39 @@ const Roles = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Role Confirmation Modal */}
+      {showDeleteConfirm && roleToDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-8 max-w-md w-full">
+            <div className="text-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">Delete Role?</h2>
+              <p className="text-gray-600">
+                Are you sure you want to delete <strong>"{roleToDelete.name}"</strong>?
+              </p>
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteConfirm(false)
+                  setRoleToDelete(null)
+                }}
+                className="px-6 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteRole}
+                className="px-6 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
+              >
+                Yes, Delete Role
+              </button>
+            </div>
           </div>
         </div>
       )}
