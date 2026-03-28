@@ -1,15 +1,21 @@
 import React from 'react'
 import Sidebar from './Sidebar'
+import Topbar from './Topbar'
 
 const Layout = ({ children }) => {
   return (
-    <div className="app-shell flex min-h-screen" style={{ backgroundColor: 'var(--app-bg-color)' }}>
-      <Sidebar />
-      <main className="flex-1 p-8 ml-64">
-        <div className="max-w-7xl mx-auto">
-          {children}
+    <div className="app-shell min-h-screen" style={{ backgroundColor: 'var(--app-bg-color)' }}>
+      <Topbar />
+      <div className="min-h-[calc(100vh-73px)]">
+        <Sidebar />
+        <main className="ml-64">
+        <div className="p-8">
+          <div className="max-w-7xl mx-auto">
+            {children}
+          </div>
         </div>
-      </main>
+        </main>
+      </div>
     </div>
   )
 }

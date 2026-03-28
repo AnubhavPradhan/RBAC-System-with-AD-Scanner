@@ -1,17 +1,465 @@
 """
 AD Scanner API routes.
 """
+import asyncio
 import json
-from fastapi import APIRouter, Depends, HTTPException, Query
+import threading
+from collections import deque
+from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
 
-from database import get_db, User, ADScanResult, ADUser, ADGroupMapping, ADConnectionConfig, AuditLog, Role
-from auth import get_current_user
+from database import get_db, User, ADScanResult, ADUser, ADGroupMapping, ADConnectionConfig, AuditLog, Role, ADNotification
+from auth import decode_token, get_current_user
 from ad_scanner.scanner import run_scan
 
 router = APIRouter(prefix="/api/ad-scanner", tags=["AD Scanner"])
+
+
+class _NotificationBroker:
+    """Simple in-memory pub/sub for AD notifications."""
+
+    def __init__(self) -> None:
+        self._subscribers: list[tuple[asyncio.Queue, asyncio.AbstractEventLoop]] = []
+        self._history = deque(maxlen=200)
+        self._lock = threading.Lock()
+
+    def subscribe(self) -> tuple[asyncio.Queue, asyncio.AbstractEventLoop]:
+        queue: asyncio.Queue = asyncio.Queue(maxsize=200)
+        loop = asyncio.get_running_loop()
+        with self._lock:
+            self._subscribers.append((queue, loop))
+        return queue, loop
+
+    def unsubscribe(self, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
+        with self._lock:
+            self._subscribers = [
+                (q, l) for (q, l) in self._subscribers if q is not queue or l is not loop
+            ]
+
+    def publish(self, event: dict) -> None:
+        event_payload = dict(event)
+        event_payload.setdefault("id", f"evt-{int(datetime.now(timezone.utc).timestamp() * 1000)}")
+        event_payload.setdefault("timestamp", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+
+        with self._lock:
+            self._history.appendleft(event_payload)
+            subscribers = list(self._subscribers)
+
+        for queue, loop in subscribers:
+            def _enqueue(target_queue: asyncio.Queue = queue, payload: dict = event_payload) -> None:
+                if target_queue.full():
+                    try:
+                        target_queue.get_nowait()
+                    except Exception:
+                        pass
+                try:
+                    target_queue.put_nowait(payload)
+                except Exception:
+                    pass
+
+            try:
+                loop.call_soon_threadsafe(_enqueue)
+            except RuntimeError:
+                # Subscriber loop already closed
+                continue
+
+    def recent(self, limit: int = 25) -> list[dict]:
+        with self._lock:
+            return list(self._history)[:max(1, min(limit, 100))]
+
+
+notification_broker = _NotificationBroker()
+
+
+def _sse_message(event_name: str, payload: dict) -> str:
+    return f"event: {event_name}\ndata: {json.dumps(payload, default=str)}\n\n"
+
+
+def _parse_ldap_datetime(value) -> Optional[datetime]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text in {"", "[]", "None"}:
+        return None
+
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        dt = None
+        for fmt in ("%Y%m%d%H%M%S.0Z", "%Y-%m-%d %H:%M:%S%z", "%Y-%m-%d %H:%M:%S"):
+            try:
+                dt = datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                continue
+        if dt is None:
+            try:
+                dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _ldap_generalized_time(dt: datetime) -> str:
+    target = dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return target.strftime("%Y%m%d%H%M%S.0Z")
+
+
+def _publish_ad_notification(
+    *,
+    db: Optional[Session] = None,
+    object_type: str,
+    action: str,
+    name: str,
+    changed_by: str,
+    source: str,
+    details: str = "",
+    timestamp: Optional[str] = None,
+    distinguished_name: str = "",
+) -> dict:
+    event = {
+        "object_type": object_type,
+        "action": action,
+        "name": name,
+        "changed_by": changed_by,
+        "source": source,
+        "details": details,
+        "distinguished_name": distinguished_name,
+        "timestamp": timestamp or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    if db is not None:
+        try:
+            ts = _parse_ldap_datetime(event["timestamp"])
+            db.add(ADNotification(
+                timestamp=ts.replace(tzinfo=None) if ts else datetime.utcnow(),
+                object_type=event["object_type"],
+                action=event["action"],
+                name=event["name"],
+                changed_by=event.get("changed_by", "system"),
+                source=event.get("source", "app"),
+                details=event.get("details", ""),
+                distinguished_name=event.get("distinguished_name", ""),
+            ))
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+    notification_broker.publish(event)
+    return event
+
+
+def _collect_directory_changes_since(db: Session, since: datetime, limit: int = 50) -> list[dict]:
+    """Poll AD for recent object additions/edits based on whenChanged."""
+    try:
+        conn, cfg = _get_ldap_conn(db)
+    except HTTPException:
+        return []
+
+    results: list[dict] = []
+    generalized_since = _ldap_generalized_time(since)
+    per_type_limit = max(5, min(40, limit // 2))
+
+    specs = [
+        {
+            "object_type": "user",
+            "search_filter": f"(&(objectClass=user)(objectCategory=person)(whenChanged>={generalized_since}))",
+            "name_attr": "sAMAccountName",
+        },
+        {
+            "object_type": "group",
+            "search_filter": f"(&(objectClass=group)(whenChanged>={generalized_since}))",
+            "name_attr": "cn",
+        },
+        {
+            "object_type": "ou",
+            "search_filter": f"(&(objectClass=organizationalUnit)(whenChanged>={generalized_since}))",
+            "name_attr": "ou",
+        },
+        {
+            "object_type": "computer",
+            "search_filter": f"(&(objectClass=computer)(whenChanged>={generalized_since}))",
+            "name_attr": "cn",
+        },
+    ]
+
+    try:
+        from ldap3 import SUBTREE
+
+        def _extract_events(entries, spec: dict) -> list[dict]:
+            extracted: list[dict] = []
+            for entry in entries:
+                changed_dt = _parse_ldap_datetime(getattr(entry, "whenChanged", None))
+                if not changed_dt or changed_dt <= since:
+                    continue
+
+                created_dt = _parse_ldap_datetime(getattr(entry, "whenCreated", None))
+                action = "edited"
+                if created_dt and abs((changed_dt - created_dt).total_seconds()) <= 90:
+                    action = "added"
+
+                raw_name = getattr(entry, spec["name_attr"], None)
+                name_value = str(raw_name) if raw_name and str(raw_name) not in {"", "[]"} else "(unknown)"
+                dn_value = str(getattr(entry, "distinguishedName", ""))
+
+                extracted.append(
+                    {
+                        "object_type": spec["object_type"],
+                        "action": action,
+                        "name": name_value,
+                        "changed_by": "domain controller",
+                        "source": "ad-server",
+                        "details": f"Detected on AD server ({spec['object_type']})",
+                        "distinguished_name": dn_value,
+                        "timestamp": changed_dt.isoformat().replace("+00:00", "Z"),
+                        "dedupe_key": f"{spec['object_type']}|{dn_value}|{changed_dt.isoformat()}|{action}",
+                    }
+                )
+            return extracted
+
+        for spec in specs:
+            try:
+                # Fast path: filter server-side by whenChanged
+                conn.search(
+                    search_base=cfg.base_dn,
+                    search_filter=spec["search_filter"],
+                    search_scope=SUBTREE,
+                    attributes=[spec["name_attr"], "distinguishedName", "whenCreated", "whenChanged"],
+                    size_limit=per_type_limit,
+                )
+                events = _extract_events(conn.entries, spec)
+
+                # Fallback: some AD environments don't behave reliably with whenChanged filters
+                if not events:
+                    conn.search(
+                        search_base=cfg.base_dn,
+                        search_filter=f"(objectClass={spec['object_type'] if spec['object_type'] != 'ou' else 'organizationalUnit'})",
+                        search_scope=SUBTREE,
+                        attributes=[spec["name_attr"], "distinguishedName", "whenCreated", "whenChanged"],
+                        size_limit=max(per_type_limit * 4, 80),
+                    )
+                    events = _extract_events(conn.entries, spec)
+
+                results.extend(events)
+            except Exception:
+                # Continue with other object types even if one search fails
+                continue
+    finally:
+        try:
+            conn.unbind()
+        except Exception:
+            pass
+
+    results.sort(key=lambda x: x["timestamp"], reverse=False)
+    return results[:limit]
+
+
+def _collect_current_directory_snapshot(db: Session, limit_per_type: int = 2000) -> dict[str, dict]:
+    """Collect a snapshot of current AD objects for delete detection via diffing."""
+    try:
+        conn, cfg = _get_ldap_conn(db)
+    except HTTPException:
+        return {}
+
+    snapshot: dict[str, dict] = {}
+    specs = [
+        {"object_type": "user", "search_filter": "(&(objectClass=user)(objectCategory=person))", "name_attr": "sAMAccountName"},
+        {"object_type": "group", "search_filter": "(objectClass=group)", "name_attr": "cn"},
+        {"object_type": "ou", "search_filter": "(objectClass=organizationalUnit)", "name_attr": "ou"},
+        {"object_type": "computer", "search_filter": "(objectClass=computer)", "name_attr": "cn"},
+    ]
+
+    try:
+        from ldap3 import SUBTREE
+
+        for spec in specs:
+            try:
+                conn.search(
+                    search_base=cfg.base_dn,
+                    search_filter=spec["search_filter"],
+                    search_scope=SUBTREE,
+                    attributes=[spec["name_attr"], "distinguishedName"],
+                    size_limit=limit_per_type,
+                )
+            except Exception:
+                continue
+
+            for entry in conn.entries:
+                dn = str(getattr(entry, "distinguishedName", "")).strip()
+                if not dn:
+                    continue
+                raw_name = getattr(entry, spec["name_attr"], None)
+                name = str(raw_name) if raw_name and str(raw_name) not in {"", "[]"} else "(unknown)"
+                key = f"{spec['object_type']}|{dn}"
+                snapshot[key] = {
+                    "object_type": spec["object_type"],
+                    "name": name,
+                    "distinguished_name": dn,
+                }
+    finally:
+        try:
+            conn.unbind()
+        except Exception:
+            pass
+
+    return snapshot
+
+
+@router.get("/notifications/recent")
+def recent_notifications(
+    limit: int = Query(25, ge=1, le=100),
+    object_type: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+
+    q = db.query(ADNotification)
+    if object_type:
+        q = q.filter(ADNotification.object_type == object_type)
+    if action:
+        q = q.filter(ADNotification.action == action)
+
+    rows = q.order_by(ADNotification.id.desc()).limit(limit).all()
+    items = [
+        {
+            "id": r.id,
+            "timestamp": r.timestamp.isoformat() + "Z" if r.timestamp else None,
+            "object_type": r.object_type,
+            "action": r.action,
+            "name": r.name,
+            "changed_by": r.changed_by,
+            "source": r.source,
+            "details": r.details,
+            "distinguished_name": r.distinguished_name,
+        }
+        for r in rows
+    ]
+
+    if not items:
+        items = notification_broker.recent(limit)
+
+    return {"items": items}
+
+
+@router.get("/notifications/stream")
+async def stream_notifications(
+    request: Request,
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    payload = decode_token(token)
+    user_id = payload.get("id")
+    user = db.query(User).filter(User.id == user_id).first() if user_id else None
+    if not user:
+        raise HTTPException(401, "User not found")
+    if user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+
+    queue, loop = notification_broker.subscribe()
+    last_seen = datetime.now(timezone.utc)
+    last_poll = 0.0
+    previous_snapshot: dict[str, dict] = {}
+    seen_keys: deque[str] = deque(maxlen=300)
+    seen_key_set: set[str] = set()
+
+    async def event_generator():
+        nonlocal last_seen, last_poll
+        try:
+            try:
+                previous_snapshot = _collect_current_directory_snapshot(db)
+            except Exception:
+                previous_snapshot = {}
+
+            yield _sse_message("connected", {"message": "notification stream connected"})
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1.2)
+                    yield _sse_message("ad-notification", event)
+                except asyncio.TimeoutError:
+                    pass
+
+                now_monotonic = asyncio.get_running_loop().time()
+                if now_monotonic - last_poll >= 4.0:
+                    last_poll = now_monotonic
+                    try:
+                        for change in _collect_directory_changes_since(db, last_seen, limit=40):
+                            key = change.pop("dedupe_key", "")
+                            if key and key in seen_key_set:
+                                continue
+                            if key:
+                                if len(seen_keys) == seen_keys.maxlen:
+                                    oldest = seen_keys.popleft()
+                                    seen_key_set.discard(oldest)
+                                seen_keys.append(key)
+                                seen_key_set.add(key)
+
+                            _publish_ad_notification(
+                                db=db,
+                                object_type=change["object_type"],
+                                action=change["action"],
+                                name=change["name"],
+                                changed_by=change["changed_by"],
+                                source=change["source"],
+                                details=change.get("details", ""),
+                                timestamp=change.get("timestamp"),
+                                distinguished_name=change.get("distinguished_name", ""),
+                            )
+                            parsed_change_ts = _parse_ldap_datetime(change.get("timestamp"))
+                            if parsed_change_ts and parsed_change_ts > last_seen:
+                                last_seen = parsed_change_ts
+
+                        # Delete detection: if object existed in previous snapshot and
+                        # is missing now, emit an external deleted event.
+                        current_snapshot = _collect_current_directory_snapshot(db)
+                        removed_keys = [k for k in previous_snapshot.keys() if k not in current_snapshot]
+                        for removed_key in removed_keys:
+                            removed = previous_snapshot.get(removed_key, {})
+                            _publish_ad_notification(
+                                db=db,
+                                object_type=removed.get("object_type", "user"),
+                                action="deleted",
+                                name=removed.get("name", "(unknown)"),
+                                changed_by="domain controller",
+                                source="ad-server",
+                                details="Detected deletion on AD server",
+                                distinguished_name=removed.get("distinguished_name", ""),
+                            )
+                        previous_snapshot = current_snapshot
+                    except Exception:
+                        # Keep stream alive even if polling fails in this cycle
+                        pass
+
+                    last_seen = max(last_seen, datetime.now(timezone.utc) - timedelta(minutes=5))
+                    yield _sse_message("ping", {"timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")})
+
+                await asyncio.sleep(0.05)
+        finally:
+            notification_broker.unsubscribe(queue, loop)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ──────────────────────────────────────────
@@ -73,6 +521,7 @@ def test_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             user=body.bind_user,
             password=body.bind_password,
             auto_bind=auto,
+            auto_referrals=False,
             receive_timeout=10,
         )
         enc = 'StartTLS' if body.use_start_tls else ('SSL' if body.use_ssl else 'plain')
@@ -112,6 +561,7 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             user=body.bind_user,
             password=body.bind_password,
             auto_bind=auto,
+            auto_referrals=False,
             receive_timeout=10,
         )
         conn.unbind()
@@ -509,7 +959,7 @@ def list_ad_groups(current_user: User = Depends(get_current_user), db: Session =
             )
             conn = Connection(
                 server, user=cfg.bind_user, password=cfg.bind_password,
-                auto_bind=True, receive_timeout=15,
+                auto_bind=True, auto_referrals=False, receive_timeout=15,
             )
 
             conn.search(
@@ -645,7 +1095,7 @@ def sync_rbac_to_ad(current_user: User = Depends(get_current_user), db: Session 
         )
         conn = Connection(
             server, user=cfg.bind_user, password=cfg.bind_password,
-            auto_bind=True, receive_timeout=15,
+            auto_bind=True, auto_referrals=False, receive_timeout=15,
         )
 
         for rbac_user in rbac_users:
@@ -770,7 +1220,7 @@ def list_ous(current_user: User = Depends(get_current_user), db: Session = Depen
 
         tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
         server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
-        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, receive_timeout=15)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=15)
 
         conn.search(
             search_base=cfg.base_dn,
@@ -826,7 +1276,7 @@ def list_computers(current_user: User = Depends(get_current_user), db: Session =
 
         tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
         server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
-        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, receive_timeout=15)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=15)
 
         conn.search(
             search_base=cfg.base_dn,
@@ -897,7 +1347,7 @@ def list_domain_controllers(current_user: User = Depends(get_current_user), db: 
 
         tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
         server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
-        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, receive_timeout=15)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=15)
 
         # primaryGroupID=516 means Domain Controllers
         conn.search(
@@ -966,7 +1416,7 @@ def _get_ldap_conn(db: Session):
     tls_config = Tls(validate=ssl_mod.CERT_NONE, version=ssl_mod.PROTOCOL_TLS) if (cfg.use_ssl or cfg.use_start_tls) else None
     server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
     auto = 'TLS_BEFORE_BIND' if (cfg.use_start_tls and not cfg.use_ssl) else True
-    conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=auto, receive_timeout=15)
+    conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=auto, auto_referrals=False, receive_timeout=15)
     return conn, cfg
 
 
@@ -1063,6 +1513,16 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
         db.add(AuditLog(user_email=current_user.email, action="Create", resource="AD User",
                         details=f"Created AD user '{body.sam_account_name}'", severity="Info"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="user",
+            action="added",
+            name=body.sam_account_name,
+            changed_by=current_user.email,
+            source="app",
+            details="Created from AD Scanner UI",
+            distinguished_name=user_dn,
+        )
         return {"success": True, "message": f"User '{body.sam_account_name}' created", "dn": user_dn}
     except HTTPException:
         raise
@@ -1129,6 +1589,16 @@ def update_ad_user(sam_account_name: str, body: ADUserUpdateRequest,
         db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD User",
                         details=f"Updated AD user '{sam_account_name}'", severity="Info"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="user",
+            action="edited",
+            name=sam_account_name,
+            changed_by=current_user.email,
+            source="app",
+            details="Updated from AD Scanner UI",
+            distinguished_name=user_dn,
+        )
         return {"success": True, "message": f"User '{sam_account_name}' updated"}
     except HTTPException:
         raise
@@ -1162,6 +1632,16 @@ def delete_ad_user(sam_account_name: str,
         db.add(AuditLog(user_email=current_user.email, action="Delete", resource="AD User",
                         details=f"Deleted AD user '{sam_account_name}'", severity="Warning"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="user",
+            action="deleted",
+            name=sam_account_name,
+            changed_by=current_user.email,
+            source="app",
+            details="Deleted from AD Scanner UI",
+            distinguished_name=user_dn,
+        )
         return {"success": True, "message": f"User '{sam_account_name}' deleted"}
     except HTTPException:
         raise
@@ -1194,6 +1674,16 @@ def add_user_to_group(sam_account_name: str, body: ADUserGroupRequest,
         db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD User",
                         details=f"Added '{sam_account_name}' to group", severity="Info"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="user",
+            action="edited",
+            name=sam_account_name,
+            changed_by=current_user.email,
+            source="app",
+            details="Updated group membership",
+            distinguished_name=user_dn,
+        )
         return {"success": True, "message": "User added to group"}
     except HTTPException:
         raise
@@ -1226,6 +1716,16 @@ def remove_user_from_group(sam_account_name: str, body: ADUserGroupRequest,
         db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD User",
                         details=f"Removed '{sam_account_name}' from group", severity="Info"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="user",
+            action="edited",
+            name=sam_account_name,
+            changed_by=current_user.email,
+            source="app",
+            details="Updated group membership",
+            distinguished_name=user_dn,
+        )
         return {"success": True, "message": "User removed from group"}
     except HTTPException:
         raise
@@ -1290,6 +1790,16 @@ def create_ad_group(body: ADGroupCreateRequest, current_user: User = Depends(get
         db.add(AuditLog(user_email=current_user.email, action="Create", resource="AD Group",
                         details=f"Created AD group '{body.name}'", severity="Info"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="group",
+            action="added",
+            name=body.name,
+            changed_by=current_user.email,
+            source="app",
+            details="Created from AD Scanner UI",
+            distinguished_name=group_dn,
+        )
         return {"success": True, "message": f"Group '{body.name}' created", "dn": group_dn}
     except HTTPException:
         raise
@@ -1326,6 +1836,16 @@ def update_ad_group(group_cn: str, body: ADGroupUpdateRequest,
         db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD Group",
                         details=f"Updated AD group '{group_cn}'", severity="Info"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="group",
+            action="edited",
+            name=group_cn,
+            changed_by=current_user.email,
+            source="app",
+            details="Updated from AD Scanner UI",
+            distinguished_name=group_dn,
+        )
         return {"success": True, "message": f"Group '{group_cn}' updated"}
     except HTTPException:
         raise
@@ -1357,6 +1877,16 @@ def delete_ad_group(group_cn: str, current_user: User = Depends(get_current_user
         db.add(AuditLog(user_email=current_user.email, action="Delete", resource="AD Group",
                         details=f"Deleted AD group '{group_cn}'", severity="Warning"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="group",
+            action="deleted",
+            name=group_cn,
+            changed_by=current_user.email,
+            source="app",
+            details="Deleted from AD Scanner UI",
+            distinguished_name=group_dn,
+        )
         return {"success": True, "message": f"Group '{group_cn}' deleted"}
     except HTTPException:
         raise
@@ -1400,6 +1930,16 @@ def create_ou(body: OUCreateRequest, current_user: User = Depends(get_current_us
         db.add(AuditLog(user_email=current_user.email, action="Create", resource="AD OU",
                         details=f"Created OU '{body.name}'", severity="Info"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="ou",
+            action="added",
+            name=body.name,
+            changed_by=current_user.email,
+            source="app",
+            details="Created from AD Scanner UI",
+            distinguished_name=ou_dn,
+        )
         return {"success": True, "message": f"OU '{body.name}' created", "dn": ou_dn}
     except HTTPException:
         raise
@@ -1428,6 +1968,16 @@ def update_ou(dn: str = Query(...), description: str = Query(""),
         db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD OU",
                         details=f"Updated OU '{dn}'", severity="Info"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="ou",
+            action="edited",
+            name=dn,
+            changed_by=current_user.email,
+            source="app",
+            details="Updated from AD Scanner UI",
+            distinguished_name=dn,
+        )
         return {"success": True, "message": "OU updated"}
     except HTTPException:
         raise
@@ -1459,6 +2009,16 @@ def delete_ou(dn: str = Query(...), current_user: User = Depends(get_current_use
         db.add(AuditLog(user_email=current_user.email, action="Delete", resource="AD OU",
                         details=f"Deleted OU '{dn}'", severity="Warning"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="ou",
+            action="deleted",
+            name=dn,
+            changed_by=current_user.email,
+            source="app",
+            details="Deleted from AD Scanner UI",
+            distinguished_name=dn,
+        )
         return {"success": True, "message": "OU deleted"}
     except HTTPException:
         raise
@@ -1513,6 +2073,16 @@ def create_computer(body: ComputerCreateRequest, current_user: User = Depends(ge
         db.add(AuditLog(user_email=current_user.email, action="Create", resource="AD Computer",
                         details=f"Created computer '{body.name}'", severity="Info"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="computer",
+            action="added",
+            name=body.name,
+            changed_by=current_user.email,
+            source="app",
+            details="Created from AD Scanner UI",
+            distinguished_name=comp_dn,
+        )
         return {"success": True, "message": f"Computer '{body.name}' created", "dn": comp_dn}
     except HTTPException:
         raise
@@ -1556,6 +2126,16 @@ def update_computer(comp_cn: str, body: ComputerUpdateRequest,
         db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD Computer",
                         details=f"Updated computer '{comp_cn}'", severity="Info"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="computer",
+            action="edited",
+            name=comp_cn,
+            changed_by=current_user.email,
+            source="app",
+            details="Updated from AD Scanner UI",
+            distinguished_name=comp_dn,
+        )
         return {"success": True, "message": f"Computer '{comp_cn}' updated"}
     except HTTPException:
         raise
@@ -1587,6 +2167,16 @@ def delete_computer(comp_cn: str, current_user: User = Depends(get_current_user)
         db.add(AuditLog(user_email=current_user.email, action="Delete", resource="AD Computer",
                         details=f"Deleted computer '{comp_cn}'", severity="Warning"))
         db.commit()
+        _publish_ad_notification(
+            db=db,
+            object_type="computer",
+            action="deleted",
+            name=comp_cn,
+            changed_by=current_user.email,
+            source="app",
+            details="Deleted from AD Scanner UI",
+            distinguished_name=comp_dn,
+        )
         return {"success": True, "message": f"Computer '{comp_cn}' deleted"}
     except HTTPException:
         raise
@@ -1597,3 +2187,5 @@ def delete_computer(comp_cn: str, current_user: User = Depends(get_current_user)
             conn.unbind()
         except:
             pass
+
+

@@ -137,7 +137,7 @@ const ADScanner = () => {
           server: data.config.server || '',
           port: data.config.port || 389,
           use_ssl: data.config.use_ssl || false,
-          use_start_tls: data.config.use_start_tls || false,
+          use_start_tls: false,
           base_dn: data.config.base_dn || '',
           bind_user: data.config.bind_user || '',
           domain: data.config.domain || '',
@@ -761,23 +761,22 @@ const ADScanner = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Encryption</label>
                 <select
-                  value={connForm.use_ssl ? 'ldaps' : connForm.use_start_tls ? 'starttls' : 'none'}
+                  value={connForm.use_ssl ? 'ldaps' : 'none'}
                   onChange={e => {
                     const v = e.target.value
                     setConnForm({
                       ...connForm,
                       use_ssl: v === 'ldaps',
-                      use_start_tls: v === 'starttls',
+                      use_start_tls: false,
                       port: v === 'ldaps' ? 636 : 389,
                     })
                   }}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                 >
                   <option value="none">None (plain LDAP, port 389)</option>
-                  <option value="starttls">StartTLS (encrypted, port 389) — Recommended</option>
                   <option value="ldaps">LDAPS / SSL (encrypted, port 636)</option>
                 </select>
-                {!connForm.use_ssl && !connForm.use_start_tls && (
+                {!connForm.use_ssl && (
                   <p className="text-xs text-amber-600 mt-1">⚠ Without encryption, password operations (create user, reset password) will fail.</p>
                 )}
               </div>

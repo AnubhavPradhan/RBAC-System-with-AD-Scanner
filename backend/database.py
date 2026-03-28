@@ -151,6 +151,19 @@ class ADConnectionConfig(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class ADNotification(Base):
+    __tablename__ = "ad_notifications"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    object_type = Column(String(50), nullable=False)   # user | group | ou | computer
+    action = Column(String(50), nullable=False)        # added | edited | deleted
+    name = Column(String(300), nullable=False)
+    changed_by = Column(String(200), default="system")
+    source = Column(String(50), default="app")        # app | ad-server
+    details = Column(Text, default="")
+    distinguished_name = Column(String(500), default="")
+
+
 # ── Create all tables ──
 def init_db():
     Base.metadata.create_all(bind=engine)

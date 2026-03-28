@@ -1,16 +1,10 @@
 import React from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 const Sidebar = () => {
   const location = useLocation()
-  const navigate = useNavigate()
-  const { hasPermission, currentUser, logout } = useAuth()
-
-  const handleLogout = async () => {
-    await logout()
-    navigate('/login')
-  }
+  const { hasPermission } = useAuth()
 
   const menuItems = [
     { path: '/dashboard', name: 'Dashboard', icon: '/icons/Dashboard.svg', permission: null },
@@ -29,9 +23,11 @@ const Sidebar = () => {
   )
 
   return (
-    <aside className="w-64 text-white min-h-screen fixed top-0 left-0 flex flex-col" style={{ backgroundColor: 'var(--app-sidebar-color)' }}>
-      <div className="p-6 flex-1 overflow-y-auto">
-        <h1 className="text-xl font-bold mb-8">RBAC & AD Scanner</h1>
+    <aside
+      className="fixed top-[73px] left-0 w-64 h-[calc(100vh-73px)] text-white border-r border-[#2a2f42] overflow-y-auto"
+      style={{ backgroundColor: 'var(--app-sidebar-color)' }}
+    >
+      <div className="p-6">
         <nav>
           <ul className="space-y-2">
             {visibleMenuItems.map((item) => {
@@ -63,26 +59,6 @@ const Sidebar = () => {
             })}
           </ul>
         </nav>
-      </div>
-      {/* Account & Logout */}
-      <div className="p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3 min-w-0">
-            <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
-              {currentUser?.name?.charAt(0).toUpperCase()}
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-white truncate">{currentUser?.name}</p>
-              <p className="text-xs text-gray-400 truncate">{currentUser?.role}</p>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="ml-3 px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-xs font-medium flex-shrink-0"
-          >
-            Logout
-          </button>
-        </div>
       </div>
     </aside>
   )
