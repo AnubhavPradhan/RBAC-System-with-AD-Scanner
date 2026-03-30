@@ -7,14 +7,42 @@ import {
 import api from '../utils/api'
 
 const STAT_META = [
-  { label: 'Total Users',    Icon: Users,        color: 'bg-blue-500'   },
-  { label: 'Active Roles',   Icon: ShieldCheck,  color: 'bg-green-500'  },
-  { label: 'Permissions',    Icon: Lock,         color: 'bg-purple-500' },
-  { label: 'Admin Users',    Icon: Activity,     color: 'bg-orange-500' },
+  {
+    label: 'Total Users',
+    Icon: Users,
+    valueColor: 'text-[#63a8ff]',
+    iconColor: 'text-[#63a8ff]',
+    iconBg: 'bg-[#17315a]'
+  },
+  {
+    label: 'Active Roles',
+    Icon: ShieldCheck,
+    valueColor: 'text-[#40e1b2]',
+    iconColor: 'text-[#40e1b2]',
+    iconBg: 'bg-[#133c43]'
+  },
+  {
+    label: 'Permissions',
+    Icon: Lock,
+    valueColor: 'text-[#a88bff]',
+    iconColor: 'text-[#a88bff]',
+    iconBg: 'bg-[#28244d]'
+  },
+  {
+    label: 'Admin Users',
+    Icon: Activity,
+    valueColor: 'text-[#ff962e]',
+    iconColor: 'text-[#ff962e]',
+    iconBg: 'bg-[#3a2b24]'
+  },
 ]
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const PIE_COLORS = ['#f59e0b', '#10b981', '#3b82f6', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6']
+const SURFACE_STYLE = {
+  backgroundColor: 'var(--app-surface-color)',
+  borderColor: 'var(--app-border-color)'
+}
 
 const Dashboard = () => {
   const [stats, setStats] = useState(
@@ -105,18 +133,18 @@ const Dashboard = () => {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-gray-800 mb-8">Dashboard</h1>
+      <h1 className="text-3xl font-bold text-blue-100 mb-8">Dashboard</h1>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {stats.map((stat, index) => (
-          <div key={index} className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className={`${stat.color} w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center`}>
-              <stat.Icon className="w-6 h-6 text-white" />
-            </div>
+          <div key={index} className="rounded-2xl border shadow-md p-6 flex items-start justify-between" style={SURFACE_STYLE}>
             <div>
-              <p className="text-gray-500 text-sm font-medium mb-1">{stat.label}</p>
-              <p className="text-3xl font-bold text-gray-800">{stat.value}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">{stat.label}</p>
+              <p className={`text-5xl leading-none font-bold ${stat.valueColor}`}>{stat.value}</p>
+            </div>
+            <div className={`${stat.iconBg} w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center`}>
+              <stat.Icon className={`w-7 h-7 ${stat.iconColor}`} />
             </div>
           </div>
         ))}
@@ -125,14 +153,14 @@ const Dashboard = () => {
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-6 mb-8">
         {/* Weekly Activity Line Chart */}
-        <div className="bg-white rounded-2xl shadow-md p-6">
-          <h2 className="text-lg font-bold text-gray-800 mb-4">Weekly Activity</h2>
+        <div className="rounded-2xl border shadow-md p-6" style={SURFACE_STYLE}>
+          <h2 className="text-lg font-bold text-blue-50 mb-4">Weekly Activity</h2>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={weeklyData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="4 4" stroke="#e5e7eb" />
-              <XAxis dataKey="day" tick={{ fontSize: 13, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 12, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+              <CartesianGrid strokeDasharray="4 4" stroke="#243968" />
+              <XAxis dataKey="day" tick={{ fontSize: 13, fill: '#9db0da' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 12, fill: '#9db0da' }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #2b3f70', boxShadow: '0 4px 12px rgba(0,0,0,0.25)', backgroundColor: '#0f1f46', color: '#dbe7ff' }} />
               <Line type="monotone" dataKey="Actions" stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 4, fill: '#3b82f6' }} activeDot={{ r: 6 }} />
               <Line type="monotone" dataKey="Logins"  stroke="#10b981" strokeWidth={2.5} dot={{ r: 4, fill: '#10b981' }} activeDot={{ r: 6 }} />
             </LineChart>
@@ -140,8 +168,8 @@ const Dashboard = () => {
         </div>
 
         {/* Role Distribution Pie Chart */}
-        <div className="bg-white rounded-2xl shadow-md p-6">
-          <h2 className="text-lg font-bold text-gray-800 mb-4">Role Distribution</h2>
+        <div className="rounded-2xl border shadow-md p-6" style={SURFACE_STYLE}>
+          <h2 className="text-lg font-bold text-blue-50 mb-4">Role Distribution</h2>
           {roleData.length > 0 ? (
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
@@ -158,36 +186,44 @@ const Dashboard = () => {
                     <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(val, name) => [`${val} users`, name]} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                <Tooltip
+                  formatter={(val, name) => [
+                    <span style={{ color: '#ecf3ff' }}>{`${val} users`}</span>,
+                    <span style={{ color: '#ecf3ff' }}>{String(name)}</span>
+                  ]}
+                  labelStyle={{ color: '#ecf3ff' }}
+                  itemStyle={{ color: '#ecf3ff' }}
+                  contentStyle={{ borderRadius: '8px', border: '1px solid #2b3f70', boxShadow: '0 4px 12px rgba(0,0,0,0.25)', backgroundColor: '#0f1f46', color: '#ecf3ff' }}
+                />
               </PieChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-gray-400 text-center py-20">No role data available</p>
+            <p className="text-blue-200 text-center py-20">No role data available</p>
           )}
         </div>
       </div>
 
       {/* Recent Activity */}
-      <div className="bg-white rounded-2xl shadow-md p-6">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">Recent Activity</h2>
+      <div className="rounded-2xl border shadow-md p-6" style={SURFACE_STYLE}>
+        <h2 className="text-xl font-bold text-blue-50 mb-4">Recent Activity</h2>
         <div className="space-y-4">
           {recentActivity.length > 0 ? (
             recentActivity.map((activity, index) => (
-              <div key={index} className="flex items-center justify-between border-b border-gray-100 pb-3 last:border-0">
+              <div key={index} className="flex items-center justify-between border-b border-blue-900/50 pb-3 last:border-0">
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center text-gray-600 font-semibold text-sm">
+                  <div className="w-10 h-10 bg-blue-900/60 rounded-full flex items-center justify-center text-blue-100 font-semibold text-sm">
                     {activity.user.charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <p className="text-gray-800 font-medium">{activity.user}</p>
-                    <p className="text-gray-500 text-sm">{activity.action}</p>
+                    <p className="text-blue-50 font-medium">{activity.user}</p>
+                    <p className="text-blue-200 text-sm">{activity.action}</p>
                   </div>
                 </div>
-                <span className="text-gray-400 text-sm">{activity.time}</span>
+                <span className="text-blue-300 text-sm">{activity.time}</span>
               </div>
             ))
           ) : (
-            <p className="text-gray-500 text-center py-8">No recent activity yet</p>
+            <p className="text-blue-200 text-center py-8">No recent activity yet</p>
           )}
         </div>
       </div>

@@ -29,6 +29,7 @@ const ADScanner = () => {
     server: '',
     port: 389,
     use_ssl: false,
+    use_start_tls: false,
     base_dn: '',
     bind_user: '',
     bind_password: '',
@@ -79,7 +80,6 @@ const ADScanner = () => {
   const [filterRisk, setFilterRisk] = useState('All')
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedUser, setExpandedUser] = useState(null)
-  const [scanHistory, setScanHistory] = useState([])
   const [mappings, setMappings] = useState([])
   const [roles, setRoles] = useState([])
   const [syncResult, setSyncResult] = useState(null)
@@ -137,10 +137,14 @@ const ADScanner = () => {
   const [dcs, setDcs] = useState([])
   const [dcsLoading, setDcsLoading] = useState(false)
 
+  const formatScanTimestamp = (value) => {
+    if (!value) return '-'
+    return String(value).replace(/\.\d+$/, '')
+  }
+
   useEffect(() => {
     fetchConnectionStatus()
     fetchLatestScan()
-    fetchScanHistory()
     fetchMappings()
     fetchRoles()
   }, [])
@@ -156,6 +160,7 @@ const ADScanner = () => {
           server: data.config.server || '',
           port: data.config.port || 389,
           use_ssl: data.config.use_ssl || false,
+          use_start_tls: false,
           base_dn: data.config.base_dn || '',
           bind_user: data.config.bind_user || '',
           domain: data.config.domain || '',
@@ -200,7 +205,7 @@ const ADScanner = () => {
     try {
       await api.post('/ad-scanner/disconnect')
       setConnection({ connected: false, config: null })
-      setConnForm({ server: '', port: 389, use_ssl: false, base_dn: '', bind_user: '', bind_password: '', domain: '' })
+      setConnForm({ server: '', port: 389, use_ssl: false, use_start_tls: false, base_dn: '', bind_user: '', bind_password: '', domain: '' })
       setTestResult(null)
     } catch (err) { showNotification('error', 'Failed to disconnect') }
   }
@@ -212,13 +217,6 @@ const ADScanner = () => {
       const { data } = await api.get('/ad-scanner/latest')
       if (data.scan) setScanData(data)
     } catch (err) { console.error('Failed to fetch latest scan:', err) }
-  }
-
-  const fetchScanHistory = async () => {
-    try {
-      const { data } = await api.get('/ad-scanner/scans')
-      setScanHistory(data)
-    } catch (err) { console.error('Failed to fetch scan history:', err) }
   }
 
   const fetchMappings = async () => {
@@ -282,9 +280,8 @@ const ADScanner = () => {
     setScanning(true)
     setSyncResult(null)
     try {
-      const { data } = await api.post('/ad-scanner/scan')
+      await api.post('/ad-scanner/scan')
       await fetchLatestScan()
-      await fetchScanHistory()
     } catch (err) { showNotification('error', 'Scan failed: ' + (err.response?.data?.detail || err.message)) }
     finally { setScanning(false) }
   }
@@ -553,7 +550,6 @@ const ADScanner = () => {
     { id: 'dcs', label: 'Domain Controllers' },
     { id: 'risks', label: 'Risk Analysis' },
     { id: 'mappings', label: 'Role Mappings' },
-    { id: 'history', label: 'Scan History' },
   ]
 
   // ── Loading state ──
@@ -567,10 +563,10 @@ const ADScanner = () => {
 
   // ── Notification config ──
   const notificationConfig = {
-    error:   { icon: XCircle,       bg: 'bg-red-50',     border: 'border-red-300',   icon_color: 'text-red-500',    title: 'Error' },
-    success: { icon: CheckCircle,   bg: 'bg-green-50',   border: 'border-green-300', icon_color: 'text-green-500',  title: 'Success' },
-    warning: { icon: AlertCircle,   bg: 'bg-yellow-50',  border: 'border-yellow-300',icon_color: 'text-yellow-500', title: 'Warning' },
-    info:    { icon: Info,          bg: 'bg-blue-50',    border: 'border-blue-300',  icon_color: 'text-blue-500',   title: 'Information' },
+    error:   { icon: XCircle,       bg: 'bg-[#1e1f28]',  border: 'border-red-500/60',    icon_color: 'text-red-500',    title: 'Error' },
+    success: { icon: CheckCircle,   bg: 'bg-[#1e1f28]',  border: 'border-green-500/60',  icon_color: 'text-green-500',  title: 'Success' },
+    warning: { icon: AlertCircle,   bg: 'bg-[#1e1f28]',  border: 'border-yellow-500/60', icon_color: 'text-yellow-500', title: 'Warning' },
+    info:    { icon: Info,          bg: 'bg-[#1e1f28]',  border: 'border-blue-500/60',   icon_color: 'text-blue-500',   title: 'Information' },
   }
 
   return (
@@ -580,7 +576,7 @@ const ADScanner = () => {
         const cfg = notificationConfig[notification.type] || notificationConfig.info
         const Icon = cfg.icon
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setNotification(null)} />
             <div className={`relative z-10 w-full max-w-md mx-4 rounded-2xl shadow-2xl border-2 ${cfg.bg} ${cfg.border} p-6`}>
               <div className="flex items-start gap-4">
@@ -588,12 +584,12 @@ const ADScanner = () => {
                   <Icon className="w-7 h-7" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-base font-semibold text-gray-800 mb-1">{cfg.title}</h3>
-                  <p className="text-sm text-gray-600 break-words">{notification.message}</p>
+                  <h3 className="text-base font-semibold text-[#e8efff] mb-1">{cfg.title}</h3>
+                  <p className="text-sm text-[#b6c2da] break-words">{notification.message}</p>
                 </div>
                 <button
                   onClick={() => setNotification(null)}
-                  className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+                  className="flex-shrink-0 text-[#8f9bb2] hover:text-[#d4ddf3] transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -601,7 +597,7 @@ const ADScanner = () => {
               <div className="mt-5 flex justify-end">
                 <button
                   onClick={() => setNotification(null)}
-                  className="px-5 py-2 bg-gray-800 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors"
+                  className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   OK
                 </button>
@@ -646,7 +642,7 @@ const ADScanner = () => {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-3">
+          <h1 className="text-3xl font-bold text-blue-100 flex items-center gap-3">
             <Shield className="w-8 h-8 text-blue-600" />
             Active Directory Scanner
           </h1>
@@ -784,18 +780,28 @@ const ADScanner = () => {
                 </div>
               </div>
 
-              {/* SSL Toggle */}
-              <div className="flex items-center gap-3">
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={connForm.use_ssl}
-                    onChange={e => setConnForm({ ...connForm, use_ssl: e.target.checked, port: e.target.checked ? 636 : 389 })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-10 h-5 bg-gray-200 rounded-full peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></div>
-                </label>
-                <span className="text-sm font-medium text-gray-700">Use SSL/TLS (LDAPS on port 636)</span>
+              {/* Encryption Mode */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Encryption</label>
+                <select
+                  value={connForm.use_ssl ? 'ldaps' : 'none'}
+                  onChange={e => {
+                    const v = e.target.value
+                    setConnForm({
+                      ...connForm,
+                      use_ssl: v === 'ldaps',
+                      use_start_tls: false,
+                      port: v === 'ldaps' ? 636 : 389,
+                    })
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                >
+                  <option value="none">None (plain LDAP, port 389)</option>
+                  <option value="ldaps">LDAPS / SSL (encrypted, port 636)</option>
+                </select>
+                {!connForm.use_ssl && (
+                  <p className="text-xs text-amber-600 mt-1">⚠ Without encryption, password operations (create user, reset password) will fail.</p>
+                )}
               </div>
 
               {/* Test result */}
@@ -862,40 +868,40 @@ const ADScanner = () => {
       {/* Summary Cards */}
       {scan && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-blue-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <Users className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">Total AD Users</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.total_users}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">Total AD Users</p>
+              <p className="text-5xl leading-none font-bold text-[#63a8ff]">{scan.total_users}</p>
+            </div>
+            <div className="bg-[#17315a] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <Users className="w-7 h-7 text-[#63a8ff]" />
             </div>
           </div>
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-red-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <AlertTriangle className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">High Risk Accounts</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.high_risk_count}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">High Risk Accounts</p>
+              <p className="text-5xl leading-none font-bold text-[#ff5f5f]">{scan.high_risk_count}</p>
+            </div>
+            <div className="bg-[#3f262c] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <AlertTriangle className="w-7 h-7 text-[#ff5f5f]" />
             </div>
           </div>
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-orange-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <Shield className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">Privileged Accounts</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.privileged_users}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">Privileged Accounts</p>
+              <p className="text-5xl leading-none font-bold text-[#ff962e]">{scan.privileged_users}</p>
+            </div>
+            <div className="bg-[#3a2b24] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <Shield className="w-7 h-7 text-[#ff962e]" />
             </div>
           </div>
-          <div className="bg-white rounded-2xl shadow-md p-6 flex items-center gap-4">
-            <div className="bg-gray-500 w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center">
-              <UserX className="w-6 h-6 text-white" />
-            </div>
+          <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
-              <p className="text-gray-500 text-sm font-medium">Stale Accounts</p>
-              <p className="text-3xl font-bold text-gray-800">{scan.stale_accounts}</p>
+              <p className="text-blue-200 text-sm font-medium mb-2">Stale Accounts</p>
+              <p className="text-5xl leading-none font-bold text-[#b4bfce]">{scan.stale_accounts}</p>
+            </div>
+            <div className="bg-[#353b46] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <UserX className="w-7 h-7 text-[#b4bfce]" />
             </div>
           </div>
         </div>
@@ -903,12 +909,12 @@ const ADScanner = () => {
 
       {/* Tabs */}
       <div className="bg-white rounded-lg shadow-md mb-6">
-        <div className="flex border-b overflow-x-auto">
+        <div className="flex w-full border-b overflow-x-auto">
           {tabs.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-6 py-4 font-semibold transition-colors whitespace-nowrap ${
+              className={`flex-1 min-w-fit px-4 py-4 text-center font-semibold transition-colors whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'text-blue-600 border-b-2 border-blue-600'
                   : 'text-gray-600 hover:text-gray-800'
@@ -940,7 +946,7 @@ const ADScanner = () => {
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-lg font-bold text-gray-800 mb-4">Last Scan Information</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div><span className="text-gray-500">Scan Time:</span><br /><strong>{scan.scan_timestamp}</strong></div>
+              <div><span className="text-gray-500">Scan Time:</span><br /><strong>{formatScanTimestamp(scan.scan_timestamp)}</strong></div>
               <div><span className="text-gray-500">Source:</span><br /><strong className="uppercase">{scan.scan_source}</strong></div>
               <div><span className="text-gray-500">Duration:</span><br /><strong>{scan.scan_duration_ms}ms</strong></div>
               <div><span className="text-gray-500">Enabled/Disabled:</span><br /><strong>{scan.enabled_users} / {scan.disabled_users}</strong></div>
@@ -976,20 +982,6 @@ const ADScanner = () => {
             </table>
           </div>
 
-          {/* Risk Level Distribution */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">Risk Level Distribution</h2>
-            <div className="grid grid-cols-4 gap-4">
-              {['Critical', 'High', 'Medium', 'Low'].map(level => (
-                <div key={level} className="text-center">
-                  <div className={`${RISK_BG[level]} text-white rounded-xl p-4 mb-2`}>
-                    <p className="text-3xl font-bold">{riskLevels[level.toLowerCase()] || 0}</p>
-                  </div>
-                  <p className="text-sm font-semibold text-gray-600">{level}</p>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       )}
 
@@ -1299,20 +1291,20 @@ const ADScanner = () => {
                           </tr>
                           {expandedGroup === idx && (
                             <tr>
-                              <td colSpan={7} className="bg-indigo-50 px-8 py-4">
-                                <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Members ({group.members.length})</p>
+                              <td colSpan={7} className="bg-[#242632] border-t border-[#2b2d38] px-8 py-4">
+                                <p className="text-xs font-semibold text-[#9aa5ba] uppercase mb-3">Members ({group.members.length})</p>
                                 {group.members.length > 0 ? (
                                   <div className="flex flex-wrap gap-2">
                                     {group.members.map((m, mi) => (
-                                      <span key={mi} className="px-3 py-1 text-xs font-medium bg-white border border-indigo-200 text-indigo-800 rounded-full">
+                                      <span key={mi} className="px-3 py-1 text-xs font-medium bg-[#1e1f28] border border-[#3c4260] text-[#c9d7ff] rounded-full">
                                         {m}
                                       </span>
                                     ))}
                                   </div>
                                 ) : (
-                                  <p className="text-sm text-gray-400 italic">No members</p>
+                                  <p className="text-sm text-[#8b96ad] italic">No members</p>
                                 )}
-                                <p className="text-xs text-gray-400 mt-3 font-mono truncate">{group.dn}</p>
+                                <p className="text-xs text-[#8794ae] mt-3 font-mono truncate">{group.dn}</p>
                               </td>
                             </tr>
                           )}
@@ -1633,7 +1625,7 @@ const ADScanner = () => {
             <p className="text-sm text-gray-500 mb-4">Users who are members of high-privilege groups</p>
             <div className="space-y-3">
               {users.filter(u => u.is_privileged).map((user, idx) => (
-                <div key={idx} className="flex items-center justify-between bg-red-50 border border-red-200 rounded-lg p-4">
+                <div key={idx} className="flex items-center justify-between bg-[#252833] border border-[#343847] rounded-lg p-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center text-white font-semibold">
                       {user.display_name?.charAt(0)?.toUpperCase()}
@@ -1669,7 +1661,7 @@ const ADScanner = () => {
             <p className="text-sm text-gray-500 mb-4">Disabled accounts still in privileged groups</p>
             <div className="space-y-3">
               {users.filter(u => u.is_orphaned).map((user, idx) => (
-                <div key={idx} className="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div key={idx} className="flex items-center justify-between bg-[#252833] border border-[#343847] rounded-lg p-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-gray-400 rounded-full flex items-center justify-center text-white font-semibold">
                       {user.display_name?.charAt(0)?.toUpperCase()}
@@ -1733,17 +1725,17 @@ const ADScanner = () => {
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-lg font-bold text-gray-800 mb-4">Weak Configurations</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+              <div className="bg-[#252833] border border-[#343847] rounded-lg p-4">
                 <div className="flex justify-between items-center">
                   <p className="font-semibold text-gray-800">Password Never Expires</p>
-                  <span className="text-2xl font-bold text-orange-600">{scan.password_never_expires}</span>
+                  <span className="text-2xl font-bold text-[#ff962e]">{scan.password_never_expires}</span>
                 </div>
                 <p className="text-sm text-gray-500 mt-1">Accounts with non-expiring passwords violate security best practices</p>
               </div>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="bg-[#252833] border border-[#343847] rounded-lg p-4">
                 <div className="flex justify-between items-center">
                   <p className="font-semibold text-gray-800">Blank Descriptions</p>
-                  <span className="text-2xl font-bold text-yellow-600">
+                  <span className="text-2xl font-bold text-[#e3b50a]">
                     {users.filter(u => !u.description?.trim()).length}
                   </span>
                 </div>
@@ -1812,48 +1804,6 @@ const ADScanner = () => {
               <li>Users are assigned the highest-priority role from their AD groups</li>
             </ol>
           </div>
-        </div>
-      )}
-
-      {/* ─── Scan History Tab ─── */}
-      {activeTab === 'history' && (
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-bold text-gray-800 mb-4">Scan History</h2>
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">ID</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Timestamp</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Source</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Users</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Privileged</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">High Risk</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Stale</th>
-                <th className="text-left py-3 px-4 text-xs text-gray-500 uppercase">Duration</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {scanHistory.map(s => (
-                <tr key={s.id} className="hover:bg-gray-50">
-                  <td className="py-3 px-4 font-medium">{s.id}</td>
-                  <td className="py-3 px-4 text-sm">{s.scan_timestamp}</td>
-                  <td className="py-3 px-4">
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      s.scan_source === 'ldap' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                    }`}>{s.scan_source.toUpperCase()}</span>
-                  </td>
-                  <td className="py-3 px-4">{s.total_users}</td>
-                  <td className="py-3 px-4 text-red-600 font-semibold">{s.privileged_users}</td>
-                  <td className="py-3 px-4 text-orange-600 font-semibold">{s.high_risk_count}</td>
-                  <td className="py-3 px-4">{s.stale_accounts}</td>
-                  <td className="py-3 px-4 text-sm text-gray-500">{s.scan_duration_ms}ms</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {scanHistory.length === 0 && (
-            <p className="text-gray-500 text-center py-8">No scans performed yet</p>
-          )}
         </div>
       )}
 
@@ -1998,7 +1948,7 @@ const ADScanner = () => {
       {showCreateGroupModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-white flex items-center justify-between">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
               <h2 className="text-lg font-bold">New Group</h2>
               <button onClick={() => setShowCreateGroupModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
@@ -2044,7 +1994,7 @@ const ADScanner = () => {
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowCreateGroupModal(false)}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium">Create</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Create</button>
               </div>
             </form>
           </div>
@@ -2055,8 +2005,9 @@ const ADScanner = () => {
       {showEditGroupModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-white">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
               <h2 className="text-lg font-bold">Edit Group: {editGroupCn}</h2>
+              <button onClick={() => setShowEditGroupModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleUpdateGroup} className="p-6 space-y-4">
               <div>
@@ -2067,7 +2018,7 @@ const ADScanner = () => {
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowEditGroupModal(false)}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium">Save</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Save</button>
               </div>
             </form>
           </div>
@@ -2078,7 +2029,7 @@ const ADScanner = () => {
       {showOuModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="bg-gradient-to-r from-yellow-500 to-orange-500 px-6 py-4 text-white flex items-center justify-between">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
               <h2 className="text-lg font-bold">New Organizational Unit</h2>
               <button onClick={() => setShowOuModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
@@ -2106,7 +2057,7 @@ const ADScanner = () => {
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowOuModal(false)}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" className="px-5 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 font-medium">Create</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Create</button>
               </div>
             </form>
           </div>
@@ -2117,8 +2068,9 @@ const ADScanner = () => {
       {showEditOuModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="bg-gradient-to-r from-yellow-500 to-orange-500 px-6 py-4 text-white">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
               <h2 className="text-lg font-bold">Edit OU</h2>
+              <button onClick={() => setShowEditOuModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleUpdateOu} className="p-6 space-y-4">
               <div>
@@ -2129,7 +2081,7 @@ const ADScanner = () => {
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowEditOuModal(false)}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" className="px-5 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 font-medium">Save</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Save</button>
               </div>
             </form>
           </div>
@@ -2140,7 +2092,7 @@ const ADScanner = () => {
       {showComputerModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="bg-gradient-to-r from-cyan-600 to-blue-600 px-6 py-4 text-white flex items-center justify-between">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
               <h2 className="text-lg font-bold">New Computer</h2>
               <button onClick={() => setShowComputerModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
@@ -2168,7 +2120,7 @@ const ADScanner = () => {
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowComputerModal(false)}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" className="px-5 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 font-medium">Create</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Create</button>
               </div>
             </form>
           </div>
@@ -2179,8 +2131,9 @@ const ADScanner = () => {
       {showEditComputerModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="bg-gradient-to-r from-cyan-600 to-blue-600 px-6 py-4 text-white">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
               <h2 className="text-lg font-bold">Edit Computer: {editComputerCn}</h2>
+              <button onClick={() => setShowEditComputerModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleUpdateComputer} className="p-6 space-y-4">
               <div>
@@ -2198,7 +2151,7 @@ const ADScanner = () => {
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowEditComputerModal(false)}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" className="px-5 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 font-medium">Save</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Save</button>
               </div>
             </form>
           </div>

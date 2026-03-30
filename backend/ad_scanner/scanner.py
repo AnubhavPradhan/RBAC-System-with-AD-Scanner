@@ -4,7 +4,7 @@ Core AD scanner: tries real LDAP first, falls back to mock data.
 import json
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -17,6 +17,49 @@ from ad_scanner.risk_engine import analyze_user_risk, generate_risk_summary
 logger = logging.getLogger(__name__)
 
 
+def _normalize_ad_datetime(value) -> Optional[str]:
+    """Convert AD timestamp values to ISO-8601 strings when possible."""
+    if value is None:
+        return None
+
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+
+    text = str(value).strip()
+    if text in {"", "[]", "None", "0"}:
+        return None
+
+    # AD FILETIME (100-ns since 1601-01-01 UTC)
+    if text.isdigit():
+        try:
+            raw = int(text)
+            if raw <= 0:
+                return None
+            epoch = datetime(1601, 1, 1, tzinfo=timezone.utc)
+            dt = epoch + timedelta(microseconds=raw // 10)
+            return dt.isoformat()
+        except Exception:
+            return None
+
+    # Best-effort parse for already formatted timestamps
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).isoformat()
+    except Exception:
+        return None
+
+
+def _safe_from_iso(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
 def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
     """
     Attempt to connect to a real AD via LDAP/LDAPS and enumerate users.
@@ -26,6 +69,7 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
     ad_server = settings.AD_SERVER
     ad_port = settings.AD_PORT
     ad_use_ssl = settings.AD_USE_SSL
+    ad_use_start_tls = getattr(settings, 'AD_USE_START_TLS', False)
     ad_base_dn = settings.AD_BASE_DN
     ad_bind_user = settings.AD_BIND_USER
     ad_bind_password = settings.AD_BIND_PASSWORD
@@ -38,6 +82,7 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
             ad_server = cfg.server
             ad_port = cfg.port
             ad_use_ssl = cfg.use_ssl
+            ad_use_start_tls = cfg.use_start_tls
             ad_base_dn = cfg.base_dn
             ad_bind_user = cfg.bind_user
             ad_bind_password = cfg.bind_password
@@ -54,12 +99,12 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
         from ldap3 import Server, Connection, ALL, SUBTREE, Tls
         import ssl as ssl_mod
 
-        logger.info("[AD Scanner] Connecting to %s:%d (SSL=%s) as %s, base=%s",
-                     ad_server, ad_port, ad_use_ssl, ad_bind_user, ad_base_dn)
+        logger.info("[AD Scanner] Connecting to %s:%d (SSL=%s, StartTLS=%s) as %s, base=%s",
+                     ad_server, ad_port, ad_use_ssl, ad_use_start_tls, ad_bind_user, ad_base_dn)
 
         tls_config = None
-        if ad_use_ssl:
-            tls_config = Tls(validate=ssl_mod.CERT_NONE)
+        if ad_use_ssl or ad_use_start_tls:
+            tls_config = Tls(validate=ssl_mod.CERT_NONE, version=ssl_mod.PROTOCOL_TLS)
 
         server = Server(
             ad_server,
@@ -70,11 +115,13 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
             connect_timeout=10,
         )
 
+        auto = 'TLS_BEFORE_BIND' if (ad_use_start_tls and not ad_use_ssl) else True
         conn = Connection(
             server,
             user=ad_bind_user,
             password=ad_bind_password,
-            auto_bind=True,
+            auto_bind=auto,
+            auto_referrals=False,
             receive_timeout=10,
         )
 
@@ -115,21 +162,8 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
                 groups.append(cn)
 
             # Parse timestamps
-            last_logon = None
-            ll_raw = _get("lastLogonTimestamp", None)
-            if ll_raw:
-                try:
-                    last_logon = ll_raw.isoformat() if hasattr(ll_raw, "isoformat") else str(ll_raw)
-                except:
-                    pass
-
-            pwd_set = None
-            ps_raw = _get("pwdLastSet", None)
-            if ps_raw:
-                try:
-                    pwd_set = ps_raw.isoformat() if hasattr(ps_raw, "isoformat") else str(ps_raw)
-                except:
-                    pass
+            last_logon = _normalize_ad_datetime(_get("lastLogonTimestamp", None))
+            pwd_set = _normalize_ad_datetime(_get("pwdLastSet", None))
 
             privileged_groups = {
                 "Domain Admins", "Enterprise Admins", "Administrators",
@@ -142,7 +176,6 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
             is_stale = False
             if last_logon:
                 try:
-                    from datetime import timedelta
                     logon_dt = datetime.fromisoformat(last_logon.replace("Z", "+00:00"))
                     if (datetime.utcnow() - logon_dt.replace(tzinfo=None)).days > settings.STALE_ACCOUNT_DAYS:
                         is_stale = True
@@ -170,10 +203,10 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
 
     except ImportError:
         logger.error("[AD Scanner] ldap3 not installed — cannot scan real AD")
-        return None
+        raise RuntimeError("ldap3 package is not installed on the backend. Install dependencies and restart.")
     except Exception as e:
         logger.error("[AD Scanner] LDAP connection/search failed: %s", e, exc_info=True)
-        return None
+        raise RuntimeError(f"LDAP connection/search failed: {e}")
 
 
 def run_scan(db: Session, triggered_by: str = "system") -> dict:
@@ -190,9 +223,7 @@ def run_scan(db: Session, triggered_by: str = "system") -> dict:
     source = "ldap"
     raw_users = _try_ldap_scan(db=db)
     if raw_users is None:
-        raise RuntimeError(
-            "LDAP scan failed. Check your AD connection settings."
-        )
+        raise RuntimeError("LDAP scan failed. Check your AD connection settings.")
 
     # ── Analyze each user ──
     analyzed_users = [analyze_user_risk(u) for u in raw_users]
@@ -227,8 +258,8 @@ def run_scan(db: Session, triggered_by: str = "system") -> dict:
             display_name=u["display_name"],
             email=u.get("email", ""),
             enabled=u.get("enabled", True),
-            last_logon=datetime.fromisoformat(u["last_logon"]) if u.get("last_logon") else None,
-            password_last_set=datetime.fromisoformat(u["password_last_set"]) if u.get("password_last_set") else None,
+            last_logon=_safe_from_iso(u.get("last_logon")),
+            password_last_set=_safe_from_iso(u.get("password_last_set")),
             password_never_expires=u.get("password_never_expires", False),
             description=u.get("description", ""),
             member_of=json.dumps(u.get("member_of", [])),

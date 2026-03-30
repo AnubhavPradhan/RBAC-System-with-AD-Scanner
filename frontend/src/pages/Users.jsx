@@ -1,11 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Pencil, Trash2, RefreshCw } from 'lucide-react'
-import { useAuth } from '../context/AuthContext'
+import { Pencil, Trash2 } from 'lucide-react'
 import api from '../utils/api'
 
 const Users = () => {
-  const { currentUser } = useAuth()
-  const isAdmin = currentUser?.role === 'Admin'
   const [showModal, setShowModal] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -14,8 +11,8 @@ const Users = () => {
   const [users, setUsers] = useState([])
   const [roles, setRoles] = useState(['Viewer'])
   const [loading, setLoading] = useState(true)
-  const [syncing, setSyncing] = useState(false)
-  const [syncResult, setSyncResult] = useState(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [userToDelete, setUserToDelete] = useState(null)
 
   const [formData, setFormData] = useState({
     name: '',
@@ -99,27 +96,20 @@ const Users = () => {
     setShowModal(true)
   }
 
-  const handleDeleteUser = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this user?')) return
-    try {
-      await api.delete(`/users/${id}`)
-      setUsers(users.filter(u => u.id !== id))
-    } catch (err) {
-      alert(err.response?.data?.error || 'Delete failed')
-    }
+  const handleDeleteUser = (user) => {
+    setUserToDelete(user)
+    setShowDeleteConfirm(true)
   }
 
-  const handleSyncToAD = async () => {
-    if (!window.confirm('This will create/update users in Active Directory based on current RBAC roles. Continue?')) return
-    setSyncing(true)
-    setSyncResult(null)
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return
     try {
-      const { data } = await api.post('/ad-scanner/sync-rbac-to-ad')
-      setSyncResult({ success: true, ...data })
+      await api.delete(`/users/${userToDelete.id}`)
+      setUsers(users.filter(u => u.id !== userToDelete.id))
+      setShowDeleteConfirm(false)
+      setUserToDelete(null)
     } catch (err) {
-      setSyncResult({ success: false, message: err.response?.data?.detail || 'Sync failed' })
-    } finally {
-      setSyncing(false)
+      alert(err.response?.data?.error || 'Delete failed')
     }
   }
 
@@ -127,20 +117,10 @@ const Users = () => {
     <div>
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">Users Management</h1>
+          <h1 className="text-3xl font-bold text-blue-100">Users Management</h1>
           <p className="text-gray-600 mt-1">Manage user accounts and access controls</p>
         </div>
         <div className="flex gap-3">
-          {isAdmin && (
-            <button
-              onClick={handleSyncToAD}
-              disabled={syncing}
-              className="flex items-center gap-2 bg-purple-600 text-white px-5 py-2.5 rounded-lg hover:bg-purple-700 transition-colors shadow-md hover:shadow-lg disabled:opacity-60"
-            >
-              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-              {syncing ? 'Syncing...' : 'Sync RBAC → AD'}
-            </button>
-          )}
           <button
             onClick={handleAddNew}
             className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors shadow-md hover:shadow-lg"
@@ -149,30 +129,6 @@ const Users = () => {
           </button>
         </div>
       </div>
-
-      {/* Sync Result Banner */}
-      {syncResult && (
-        <div className={`mb-4 p-4 rounded-lg flex justify-between items-start ${
-          syncResult.success ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-800'
-        }`}>
-          <div>
-            {syncResult.success ? (
-              <>
-                <p className="font-semibold">RBAC → AD Sync Complete</p>
-                <p className="text-sm mt-1">Created: {syncResult.created} | Updated: {syncResult.updated} | Skipped: {syncResult.skipped}</p>
-                {syncResult.errors?.length > 0 && (
-                  <ul className="text-sm mt-1 list-disc list-inside">
-                    {syncResult.errors.map((e, i) => <li key={i}>{e}</li>)}
-                  </ul>
-                )}
-              </>
-            ) : (
-              <p className="font-semibold">{syncResult.message}</p>
-            )}
-          </div>
-          <button onClick={() => setSyncResult(null)} className="ml-4 text-lg leading-none opacity-60 hover:opacity-100">&times;</button>
-        </div>
-      )}
 
       {/* Search and Filter Bar */}
       <div className="bg-white rounded-lg shadow-md p-4 mb-6">
@@ -300,7 +256,7 @@ const Users = () => {
                       <Pencil className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => handleDeleteUser(user.id)}
+                      onClick={() => handleDeleteUser(user)}
                       className="text-red-500 hover:text-red-700 transition-colors"
                       title="Delete"
                     >
@@ -408,6 +364,39 @@ const Users = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Confirmation Modal */}
+      {showDeleteConfirm && userToDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-8 max-w-md w-full">
+            <div className="text-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">Delete User?</h2>
+              <p className="text-gray-600">
+                Are you sure you want to delete <strong>"{userToDelete.name}"</strong>?
+              </p>
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteConfirm(false)
+                  setUserToDelete(null)
+                }}
+                className="px-6 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteUser}
+                className="px-6 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
+              >
+                Yes, Delete User
+              </button>
+            </div>
           </div>
         </div>
       )}

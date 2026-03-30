@@ -142,12 +142,26 @@ class ADConnectionConfig(Base):
     server = Column(String(300), nullable=False)       # IP or hostname
     port = Column(Integer, default=389)
     use_ssl = Column(Boolean, default=False)
+    use_start_tls = Column(Boolean, default=False)     # StartTLS on port 389
     base_dn = Column(String(300), nullable=False)      # e.g. DC=mylab,DC=local
     bind_user = Column(String(300), nullable=False)     # full DN or domain\\user
     bind_password = Column(String(300), nullable=False)
     domain = Column(String(200), default="")            # friendly domain name
     is_connected = Column(Boolean, default=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ADNotification(Base):
+    __tablename__ = "ad_notifications"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    object_type = Column(String(50), nullable=False)   # user | group | ou | computer
+    action = Column(String(50), nullable=False)        # added | edited | deleted
+    name = Column(String(300), nullable=False)
+    changed_by = Column(String(200), default="system")
+    source = Column(String(50), default="app")        # app | ad-server
+    details = Column(Text, default="")
+    distinguished_name = Column(String(500), default="")
 
 
 # ── Create all tables ──
@@ -157,6 +171,11 @@ def init_db():
     with engine.connect() as conn:
         try:
             conn.execute(__import__('sqlalchemy').text("ALTER TABLE users ADD COLUMN last_login DATETIME"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(__import__('sqlalchemy').text("ALTER TABLE ad_connection_config ADD COLUMN use_start_tls BOOLEAN DEFAULT 0"))
             conn.commit()
         except Exception:
             pass  # Column already exists

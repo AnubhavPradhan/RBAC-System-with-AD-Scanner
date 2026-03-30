@@ -20,8 +20,9 @@ class Settings(BaseSettings):
 
     # ── Active Directory / LDAP ──
     AD_SERVER: str = os.getenv("AD_SERVER", "")          # e.g. ldaps://dc.example.com
-    AD_PORT: int = int(os.getenv("AD_PORT", "636"))       # 636 for LDAPS
-    AD_USE_SSL: bool = True
+    AD_PORT: int = int(os.getenv("AD_PORT", "389"))       # 389 for LDAP, 636 for LDAPS
+    AD_USE_SSL: bool = os.getenv("AD_USE_SSL", "false").lower() in ("true", "1", "yes")
+    AD_USE_START_TLS: bool = os.getenv("AD_USE_START_TLS", "false").lower() in ("true", "1", "yes")
     AD_BASE_DN: str = os.getenv("AD_BASE_DN", "DC=example,DC=com")
     AD_BIND_USER: str = os.getenv("AD_BIND_USER", "")     # service account
     AD_BIND_PASSWORD: str = os.getenv("AD_BIND_PASSWORD", "")
