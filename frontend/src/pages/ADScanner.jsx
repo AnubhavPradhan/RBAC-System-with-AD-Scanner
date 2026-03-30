@@ -35,6 +35,29 @@ const ADScanner = () => {
     domain: '',
   })
 
+  // ── SSE Notification Stream ──
+  useEffect(() => {
+    if (!connection?.connected) return;
+    // Optionally delay stream start for better UX
+    const timer = setTimeout(() => {
+      // Get token from localStorage or context as needed
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      const eventSource = new EventSource(`/api/ad-scanner/notifications/stream?token=${token}`);
+      eventSource.onmessage = (event) => {
+        // You can handle notifications here, e.g.:
+        // showNotification('info', event.data);
+      };
+      eventSource.onerror = (err) => {
+        eventSource.close();
+      };
+      // Cleanup on unmount
+      return () => eventSource.close();
+    }, 1000); // 1s delay for UI render
+
+    return () => clearTimeout(timer);
+  }, [connection?.connected]);
+
   // ── Notification / Confirm state ──
   const [notification, setNotification] = useState(null)   // { type: 'error'|'success'|'warning'|'info', message }
   const [confirmDialog, setConfirmDialog] = useState(null) // { message, onConfirm }
