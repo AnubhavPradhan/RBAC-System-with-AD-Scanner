@@ -122,7 +122,7 @@ const AuditLogs = () => {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-blue-100 mb-8">Audit Logs</h1>
+      <h1 className="text-3xl font-bold text-white mb-8">Audit Logs</h1>
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -172,11 +172,11 @@ const AuditLogs = () => {
         <div className="mb-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Action</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Action</label>
               <select
                 value={filters.action}
                 onChange={(e) => handleFilterChange('action', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#1f1f1f] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
               >
                 <option>All</option>
                 <option>Login</option>
@@ -189,31 +189,31 @@ const AuditLogs = () => {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">User</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">User</label>
               <input
                 type="text"
                 value={filters.user}
                 onChange={(e) => handleFilterChange('user', e.target.value)}
                 placeholder="Search by user email..."
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">From Date</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">From Date</label>
               <input
                 type="date"
                 value={filters.dateFrom}
                 onChange={(e) => handleFilterChange('dateFrom', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">To Date</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">To Date</label>
               <input
                 type="date"
                 value={filters.dateTo}
                 onChange={(e) => handleFilterChange('dateTo', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
           </div>

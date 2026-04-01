@@ -117,7 +117,7 @@ const Users = () => {
     <div>
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-blue-100">Users Management</h1>
+          <h1 className="text-3xl font-bold text-white">Users Management</h1>
           <p className="text-gray-600 mt-1">Manage user accounts and access controls</p>
         </div>
         <div className="flex gap-3">
@@ -131,7 +131,7 @@ const Users = () => {
       </div>
 
       {/* Search and Filter Bar */}
-      <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+      <div className="bg-[#1f1f1f] rounded-lg shadow-md p-4 mb-6">
         <div className="flex flex-col md:flex-row md:items-center gap-4">
           <div className="flex-1">
             <div className="relative">
@@ -140,7 +140,7 @@ const Users = () => {
                 placeholder="Search users by name or email..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-4 py-2.5 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent"
               />
             </div>
           </div>
@@ -148,7 +148,7 @@ const Users = () => {
             <select
               value={filterRole}
               onChange={(e) => setFilterRole(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="px-4 py-2.5 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
             >
               <option value="All">All Roles</option>
               {roles.map(role => (
@@ -158,7 +158,7 @@ const Users = () => {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="px-4 py-2.5 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
             >
               <option value="All">All Status</option>
               <option value="Active">Active</option>
@@ -285,7 +285,7 @@ const Users = () => {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                   required
                 />
               </div>
@@ -295,7 +295,7 @@ const Users = () => {
                   type="text"
                   value={formData.username}
                   onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                   placeholder="Enter username"
                 />
               </div>
@@ -305,7 +305,7 @@ const Users = () => {
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                   required
                 />
               </div>
@@ -317,7 +317,7 @@ const Users = () => {
                   type="password"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                   placeholder={editingUser ? 'Leave blank to keep current' : 'Enter password'}
                   {...(!editingUser && { required: true })}
                 />
@@ -327,7 +327,7 @@ const Users = () => {
                 <select
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                 >
                   {roles.map(role => (
                     <option key={role} value={role}>{role}</option>
@@ -339,7 +339,7 @@ const Users = () => {
                 <select
                   value={formData.status}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                 >
                   <option>Active</option>
                   <option>Inactive</option>

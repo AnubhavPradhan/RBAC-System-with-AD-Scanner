@@ -53,6 +53,13 @@ const Dashboard = () => {
   const [roleData, setRoleData] = useState([])
   const [adStatus, setAdStatus] = useState({ loading: true, configured: false, connected: false, message: '' })
 
+  const normalizeActivitySource = (text) => {
+    if (typeof text !== 'string') return text
+    const useLdaps = adStatus?.port === 636 || /ldaps/i.test(adStatus?.message || '')
+    if (!useLdaps) return text
+    return text.replace(/\(ldap\)/gi, '(LDAPS)')
+  }
+
   useEffect(() => {
     const fetchStats = async () => {
       try {
@@ -157,7 +164,7 @@ const Dashboard = () => {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-blue-100 mb-8">Dashboard</h1>
+      <h1 className="text-3xl font-bold text-white mb-8">Dashboard</h1>
 
       <div className="rounded-2xl border shadow-md p-4 mb-6 flex items-center justify-between" style={SURFACE_STYLE}>
         <div>
@@ -250,25 +257,25 @@ const Dashboard = () => {
 
       {/* Recent Activity */}
       <div className="rounded-2xl border shadow-md p-6" style={SURFACE_STYLE}>
-        <h2 className="text-xl font-bold text-blue-50 mb-4">Recent Activity</h2>
+        <h2 className="text-xl font-bold text-white mb-4">Recent Activity</h2>
         <div className="space-y-4">
           {recentActivity.length > 0 ? (
             recentActivity.map((activity, index) => (
               <div key={index} className="flex items-center justify-between border-b border-blue-900/50 pb-3 last:border-0">
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-blue-900/60 rounded-full flex items-center justify-center text-blue-100 font-semibold text-sm">
+                  <div className="w-10 h-10 bg-blue-900/60 rounded-full flex items-center justify-center text-white font-semibold text-sm">
                     {activity.user.charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <p className="text-blue-50 font-medium">{activity.user}</p>
-                    <p className="text-blue-200 text-sm">{activity.action}</p>
+                    <p className="text-white font-medium">{activity.user}</p>
+                    <p className="text-white text-sm">{normalizeActivitySource(activity.action)}</p>
                   </div>
                 </div>
-                <span className="text-blue-300 text-sm">{activity.time}</span>
+                <span className="text-white text-sm">{activity.time}</span>
               </div>
             ))
           ) : (
-            <p className="text-blue-200 text-center py-8">No recent activity yet</p>
+            <p className="text-white text-center py-8">No recent activity yet</p>
           )}
         </div>
       </div>

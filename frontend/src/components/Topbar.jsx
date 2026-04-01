@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, Filter } from 'lucide-react'
+import { Bell, Filter, Shield } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../utils/api'
@@ -108,16 +108,19 @@ const Topbar = () => {
   }
 
   return (
-    <header className="sticky top-0 z-30 border-b border-[#2a2f42]" style={{ backgroundColor: 'var(--app-sidebar-color)' }}>
+    <header className="sticky top-0 z-30 border-b border-[#2a2a2a]" style={{ backgroundColor: 'var(--app-sidebar-color)' }}>
       <div className="w-full px-6 py-4 flex items-center justify-between">
-        <div className="text-2xl font-bold text-[#e8efff]">RBAC & AD Scanner</div>
+        <div className="text-2xl font-bold text-white flex items-center gap-2.5">
+          <Shield className="w-7 h-7 text-white" />
+          <span>RBAC & AD Scanner</span>
+        </div>
 
         <div className="flex items-center gap-3" ref={panelRef}>
           {isAdmin && (
             <div className="relative">
               <button
                 onClick={() => setOpen((v) => !v)}
-                className="relative p-2.5 rounded-xl border border-[#2a2f42] bg-[#16171d] text-white hover:text-white hover:border-[#3d4b70] transition-colors"
+                className="relative p-2.5 rounded-xl border border-[#2a2a2a] bg-[#1f1f1f] text-white hover:text-white hover:border-[#3a3a3a] transition-colors"
                 title="AD Notifications"
               >
                 <Bell className="w-5 h-5" />
@@ -129,17 +132,17 @@ const Topbar = () => {
               </button>
 
               {open && (
-                <div className="absolute right-0 mt-2 w-[430px] max-w-[90vw] rounded-2xl border border-[#2a2f42] bg-[#16171d] shadow-2xl overflow-hidden">
-                  <div className="px-4 py-3 border-b border-[#2a2f42] flex items-center justify-between">
-                    <p className="text-sm font-semibold text-[#e8efff]">AD Notifications</p>
+                <div className="absolute right-0 mt-2 w-[430px] max-w-[90vw] rounded-2xl border border-[#2a2a2a] bg-[#1f1f1f] shadow-2xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-[#2a2a2a] flex items-center justify-between">
+                    <p className="text-sm font-semibold text-white">AD Notifications</p>
                   </div>
 
-                  <div className="px-4 py-3 border-b border-[#2a2f42] flex items-center gap-2">
+                  <div className="px-4 py-3 border-b border-[#2a2a2a] flex items-center gap-2">
                     <Filter className="w-4 h-4 text-[#9aa9c7]" />
                     <select
                       value={objectFilter}
                       onChange={(e) => setObjectFilter(e.target.value)}
-                      className="bg-[#23283a] border border-[#2f3b58] rounded-lg px-2 py-1 text-xs text-[#d7e5ff]"
+                      className="bg-[#323232] border border-[#3a3a3a] rounded-lg px-2 py-1 text-xs text-gray-200"
                     >
                       {OBJECT_FILTERS.map((option) => (
                         <option key={option} value={option}>
@@ -150,7 +153,7 @@ const Topbar = () => {
                     <select
                       value={actionFilter}
                       onChange={(e) => setActionFilter(e.target.value)}
-                      className="bg-[#23283a] border border-[#2f3b58] rounded-lg px-2 py-1 text-xs text-[#d7e5ff]"
+                      className="bg-[#323232] border border-[#3a3a3a] rounded-lg px-2 py-1 text-xs text-gray-200\"
                     >
                       {ACTION_FILTERS.map((option) => (
                         <option key={option} value={option}>
@@ -162,19 +165,19 @@ const Topbar = () => {
 
                   <div className="max-h-96 overflow-y-auto">
                     {filteredItems.length === 0 ? (
-                      <div className="px-4 py-5 text-sm text-[#9aa9c7]">No matching notifications.</div>
+                      <div className="px-4 py-5 text-sm text-gray-400">No matching notifications.</div>
                     ) : (
                       filteredItems.map((item, idx) => (
-                        <div key={`${item.timestamp}-${item.name}-${idx}`} className="px-4 py-3 border-b border-[#2a2f42] last:border-b-0">
-                          <p className="text-sm text-[#dfe9ff]">
+                        <div key={`${item.timestamp}-${item.name}-${idx}`} className="px-4 py-3 border-b border-[#2a2a2a] last:border-b-0">
+                          <p className="text-sm text-gray-200">
                             <span className="font-semibold capitalize">{item.object_type}</span>{' '}
                             <span className="font-semibold">{item.name}</span>{' '}
                             was <span className="font-semibold">{item.action}</span>
                           </p>
-                          <p className="text-xs text-[#8ea2c8] mt-1">
+                          <p className="text-xs text-gray-400 mt-1">
                             Source: {item.source} · By: {item.changed_by}
                           </p>
-                          <p className="text-[11px] text-[#7c8ca8] mt-1">
+                          <p className="text-[11px] text-gray-500 mt-1">
                             {item.timestamp ? new Date(item.timestamp).toLocaleString() : '-'}
                           </p>
                         </div>
@@ -188,8 +191,8 @@ const Topbar = () => {
 
           <div className="flex items-center space-x-3 min-w-0">
             <div className="min-w-0 text-right">
-              <p className="text-sm font-semibold text-[#e8efff] truncate">{currentUser?.name || 'User'}</p>
-              <p className="text-xs text-[#91a1bd] truncate">{currentUser?.role || '-'}</p>
+              <p className="text-sm font-semibold text-white truncate">{currentUser?.name || 'User'}</p>
+              <p className="text-xs text-gray-400 truncate">{currentUser?.role || '-'}</p>
             </div>
             <div className="relative">
               <button
@@ -201,10 +204,10 @@ const Topbar = () => {
               </button>
 
               {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-40 rounded-xl border border-[#2f3b58] bg-[#151926] shadow-2xl overflow-hidden z-50">
+                <div className="absolute right-0 mt-2 w-40 rounded-xl border border-[#3a3a3a] bg-[#1f1f1f] shadow-2xl overflow-hidden z-50">
                   <button
                     onClick={handleLogout}
-                    className="w-full text-left px-4 py-2.5 text-sm font-medium text-[#e8efff] hover:bg-[#1d2435] transition-colors"
+                    className="w-full text-left px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2a2a2a] transition-colors"
                   >
                     Logout
                   </button>

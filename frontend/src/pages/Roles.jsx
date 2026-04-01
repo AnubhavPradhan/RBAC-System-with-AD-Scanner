@@ -104,7 +104,7 @@ const Roles = () => {
   return (
     <div>
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-blue-100">Roles Management</h1>
+        <h1 className="text-3xl font-bold text-white">Roles Management</h1>
         <button
           onClick={handleAddNew}
           className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
@@ -177,7 +177,7 @@ const Roles = () => {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                   required
                 />
               </div>
@@ -186,7 +186,7 @@ const Roles = () => {
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                   rows="3"
                   required
                 />
@@ -200,7 +200,7 @@ const Roles = () => {
                         type="checkbox"
                         checked={formData.permissions.includes(permission)}
                         onChange={() => handlePermissionToggle(permission)}
-                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-white"
                       />
                       <span className="ml-2 text-gray-700">{permission}</span>
                     </label>

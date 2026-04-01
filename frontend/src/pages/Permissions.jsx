@@ -222,7 +222,7 @@ const Permissions = () => {
     <div>
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-blue-100">Permissions Management</h1>
+          <h1 className="text-3xl font-bold text-white">Permissions Management</h1>
           <p className="text-gray-600 mt-1">Define and manage access permissions for your application</p>
         </div>
         <button
@@ -249,17 +249,17 @@ const Permissions = () => {
       </div>
 
       {/* Search and Filter Bar */}
-      <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+      <div className="bg-[#1f1f1f] rounded-lg shadow-md p-4 mb-6">
         {/* Select All Checkbox */}
-        <div className="mb-4 pb-4 border-b border-gray-200">
+        <div className="mb-4 pb-4 border-b border-[#3a3a3a]">
           <label className="flex items-center cursor-pointer">
             <input
               type="checkbox"
               checked={selectedPermissions.length === filteredPermissions.length && filteredPermissions.length > 0}
               onChange={toggleSelectAll}
-              className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+              className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-white"
             />
-            <span className="ml-3 text-gray-700 font-medium">
+            <span className="ml-3 text-gray-300 font-medium">
               Select all {filteredPermissions.length} permission{filteredPermissions.length > 1 ? 's' : ''}
             </span>
           </label>
@@ -273,7 +273,7 @@ const Permissions = () => {
                 placeholder="Search permissions by name or description..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-4 py-2.5 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent"
               />
             </div>
           </div>
@@ -281,7 +281,7 @@ const Permissions = () => {
             <select
               value={filterCategory}
               onChange={(e) => setFilterCategory(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="px-4 py-2.5 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
             >
               <option value="All">All Categories</option>
               {categories.map(cat => (
@@ -291,7 +291,7 @@ const Permissions = () => {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="px-4 py-2.5 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
             >
               <option value="All">All Status</option>
               <option value="Active">Active</option>
@@ -382,12 +382,12 @@ const Permissions = () => {
           {/* Permissions by Category */}
           <div className="space-y-6">{Object.entries(groupedPermissions).map(([category, perms]) => (
           <div key={category} className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
+            <div className="bg-[#323232] px-6 py-4 border-b border-[#3a3a3a]">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-gray-800">
+                <h2 className="text-lg font-bold text-white">
                   {category}
                 </h2>
-                <span className="bg-white px-3 py-1 rounded-full text-sm font-semibold text-gray-600">
+                <span className="bg-[#1f1f1f] px-3 py-1 rounded-full text-sm font-semibold text-gray-300 border border-[#3a3a3a]">
                   {perms.length} {perms.length === 1 ? 'permission' : 'permissions'}
                 </span>
               </div>
@@ -402,7 +402,7 @@ const Permissions = () => {
                         type="checkbox"
                         checked={selectedPermissions.includes(permission.id)}
                         onChange={() => toggleSelectPermission(permission.id)}
-                        className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-white"
                       />
                     </div>
 
@@ -489,7 +489,7 @@ const Permissions = () => {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent"
                   placeholder="e.g., Create Posts, Delete Users"
                   required
                 />
@@ -503,7 +503,7 @@ const Permissions = () => {
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent"
                   rows="3"
                   placeholder="Explain what this permission allows users to do..."
                   required
@@ -519,7 +519,7 @@ const Permissions = () => {
                   <select
                     value={formData.category}
                     onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white bg-white"
                   >
                     {categories.map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
@@ -535,7 +535,7 @@ const Permissions = () => {
                   <select
                     value={formData.status}
                     onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white bg-white"
                   >
                     <option value="Active">Active</option>
                     <option value="Inactive">Inactive</option>

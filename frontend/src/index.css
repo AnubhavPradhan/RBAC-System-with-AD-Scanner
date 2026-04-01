@@ -3,10 +3,10 @@
 @tailwind utilities;
 
 :root {
-  --app-bg-color: #16171d;
-  --app-surface-color: #1e1f28;
-  --app-sidebar-color: var(--app-surface-color);
-  --app-border-color: #2b2d38;
+  --app-bg-color: #131313;
+  --app-surface-color: #1f1f1f;
+  --app-sidebar-color: #131313;
+  --app-border-color: #2a2a2a;
 }
 
 body {
@@ -34,23 +34,23 @@ body {
 }
 
 .app-shell .text-gray-800 {
-  color: #eceff4 !important;
+  color: #f0f0f0 !important;
 }
 
 .app-shell .text-gray-700 {
-  color: #d5dae3 !important;
+  color: #e0e0e0 !important;
 }
 
 .app-shell .text-gray-600 {
-  color: #b6bdca !important;
+  color: #c0c0c0 !important;
 }
 
 .app-shell .text-gray-500 {
-  color: #969eac !important;
+  color: #a0a0a0 !important;
 }
 
 .app-shell .text-gray-400 {
-  color: #7c8596 !important;
+  color: #808080 !important;
 }
 
 .app-shell .border-gray-100,
@@ -73,21 +73,21 @@ body {
 }
 
 .app-shell .bg-gray-50 {
-  background-color: #242632 !important;
+  background-color: #252525 !important;
 }
 
 .app-shell .bg-gray-100 {
-  background-color: #2a2c39 !important;
+  background-color: #2a2a2a !important;
 }
 
 .app-shell .hover\:bg-gray-50:hover {
-  background-color: #2b2e3c !important;
+  background-color: #2a2a2a !important;
 }
 
 .app-shell input:not([type='checkbox']):not([type='radio']):not([type='button']):not([type='submit']):not([type='reset']):not([type='file']):not([type='range']):not([type='color']),
 .app-shell select,
 .app-shell textarea {
-  background-color: #242632 !important;
+  background-color: #323232 !important;
   color: #eceff4 !important;
   border-color: var(--app-border-color) !important;
   color-scheme: dark;
