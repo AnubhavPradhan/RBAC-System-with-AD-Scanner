@@ -67,6 +67,7 @@ const ADScanner = () => {
   // ── Notification / Confirm state ──
   const [notification, setNotification] = useState(null)   // { type: 'error'|'success'|'warning'|'info', message }
   const [confirmDialog, setConfirmDialog] = useState(null) // { message, onConfirm }
+  const [showAdUserPassword, setShowAdUserPassword] = useState(false)
 
   const showNotification = useCallback((type, message) => {
     setNotification({ type, message })
@@ -330,6 +331,7 @@ const ADScanner = () => {
   const openCreateUser = () => {
     setUserModalMode('create')
     setUserForm({ first_name: '', last_name: '', initials: '', full_name: '', sam_account_name: '', upn_suffix: connection?.config?.domain || '', password: '', description: '', enabled: true, password_never_expires: false, ou_dn: '' })
+    setShowAdUserPassword(false)
     setShowUserModal(true)
   }
 
@@ -349,6 +351,7 @@ const ADScanner = () => {
       password_never_expires: user.password_never_expires || false,
       ou_dn: '',
     })
+    setShowAdUserPassword(false)
     setShowUserModal(true)
   }
 
@@ -1808,12 +1811,12 @@ const ADScanner = () => {
       {/* ═══ Create / Edit User Modal ═══ */}
       {showUserModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
               <h2 className="text-lg font-bold">{userModalMode === 'create' ? 'New User' : 'Edit User'}</h2>
               <button onClick={() => setShowUserModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
-            <form onSubmit={handleSaveUser} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+            <form onSubmit={handleSaveUser} className="p-5 space-y-3">
               {userModalMode === 'create' && (
                 <>
                   <div className="grid grid-cols-5 gap-3">
@@ -1854,8 +1857,24 @@ const ADScanner = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Password *</label>
-                    <input type="password" required value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                    <div className="relative">
+                      <input
+                        type={showAdUserPassword ? 'text' : 'password'}
+                        required
+                        value={userForm.password}
+                        onChange={e => setUserForm({...userForm, password: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-10 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAdUserPassword(v => !v)}
+                        className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700"
+                        aria-label={showAdUserPassword ? 'Hide password' : 'Show password'}
+                        title={showAdUserPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showAdUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                 </>
               )}

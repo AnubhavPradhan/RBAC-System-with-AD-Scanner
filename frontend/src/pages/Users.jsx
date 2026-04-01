@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Pencil, Trash2 } from 'lucide-react'
+import { Pencil, Trash2, Eye, EyeOff } from 'lucide-react'
 import api from '../utils/api'
 
 const Users = () => {
@@ -13,6 +13,7 @@ const Users = () => {
   const [loading, setLoading] = useState(true)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [userToDelete, setUserToDelete] = useState(null)
+  const [showUserPassword, setShowUserPassword] = useState(false)
 
   const [formData, setFormData] = useState({
     name: '',
@@ -87,12 +88,14 @@ const Users = () => {
       role: user.role,
       status: user.status
     })
+    setShowUserPassword(false)
     setShowModal(true)
   }
 
   const handleAddNew = () => {
     setEditingUser(null)
     setFormData({ name: '', username: '', email: '', password: '', role: 'Viewer', status: 'Active' })
+    setShowUserPassword(false)
     setShowModal(true)
   }
 
@@ -313,14 +316,25 @@ const Users = () => {
                 <label className="block text-gray-700 text-sm font-bold mb-2">
                   Password {editingUser && <span className="text-gray-400 font-normal">(leave blank to keep current)</span>}
                 </label>
-                <input
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
-                  placeholder={editingUser ? 'Leave blank to keep current' : 'Enter password'}
-                  {...(!editingUser && { required: true })}
-                />
+                <div className="relative">
+                  <input
+                    type={showUserPassword ? 'text' : 'password'}
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
+                    placeholder={editingUser ? 'Leave blank to keep current' : 'Enter password'}
+                    {...(!editingUser && { required: true })}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowUserPassword(v => !v)}
+                    className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700"
+                    aria-label={showUserPassword ? 'Hide password' : 'Show password'}
+                    title={showUserPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
               <div className="mb-4">
                 <label className="block text-gray-700 text-sm font-bold mb-2">Role</label>
