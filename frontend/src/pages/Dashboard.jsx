@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Users, ShieldCheck, Lock, Activity } from 'lucide-react'
+import { Users, ShieldCheck, Lock, Activity, Wifi, WifiOff } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend
@@ -51,6 +51,7 @@ const Dashboard = () => {
   const [recentActivity, setRecentActivity] = useState([])
   const [weeklyData, setWeeklyData] = useState(DAYS.map(d => ({ day: d, Logins: 0, Actions: 0 })))
   const [roleData, setRoleData] = useState([])
+  const [adStatus, setAdStatus] = useState({ loading: true, configured: false, connected: false, message: '' })
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -112,9 +113,32 @@ const Dashboard = () => {
       }
     }
 
+    const fetchAdStatus = async () => {
+      try {
+        const { data } = await api.get('/ad-scanner/status')
+        setAdStatus({
+          loading: false,
+          configured: !!data.configured,
+          connected: !!data.connected,
+          message: data.message || '',
+          server: data.server || '',
+          port: data.port || null,
+        })
+      } catch (_) {
+        // Do not show cross-page connection errors outside AD Scanner.
+        setAdStatus({
+          loading: false,
+          configured: false,
+          connected: false,
+          message: 'AD status unavailable',
+        })
+      }
+    }
+
     fetchStats()
     fetchActivity()
     fetchRoleDistribution()
+    fetchAdStatus()
   }, [])
 
   const renderPieLabel = ({ cx, cy, midAngle, outerRadius, index }) => {
@@ -134,6 +158,27 @@ const Dashboard = () => {
   return (
     <div>
       <h1 className="text-3xl font-bold text-blue-100 mb-8">Dashboard</h1>
+
+      <div className="rounded-2xl border shadow-md p-4 mb-6 flex items-center justify-between" style={SURFACE_STYLE}>
+        <div>
+          <p className="text-sm text-blue-200">Windows Server AD Connection</p>
+          <div className="flex flex-wrap items-center gap-2 mt-0.5">
+            <p className="text-base font-semibold text-blue-50">
+              {adStatus.loading ? 'Checking status...' : adStatus.connected ? 'Connected' : 'Offline'}
+            </p>
+            {!adStatus.loading && (
+              <p className="text-sm text-blue-300">{adStatus.message}</p>
+            )}
+          </div>
+        </div>
+        <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${adStatus.connected ? 'bg-green-900/40' : 'bg-red-900/40'}`}>
+          {adStatus.connected ? (
+            <Wifi className="w-5 h-5 text-green-400" />
+          ) : (
+            <WifiOff className="w-5 h-5 text-red-400" />
+          )}
+        </div>
+      </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
