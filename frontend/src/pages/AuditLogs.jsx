@@ -29,6 +29,8 @@ const exportToJSON = (data, filename) => {
 const AuditLogs = () => {
   const [logs, setLogs] = useState([])
   const [filteredLogs, setFilteredLogs] = useState([])
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [filters, setFilters] = useState({
     action: 'All',
@@ -68,7 +70,19 @@ const AuditLogs = () => {
       filtered = filtered.filter(log => log.timestamp <= filters.dateTo + ' 23:59:59')
     }
     setFilteredLogs(filtered)
+    setCurrentPage(1)
   }, [filters, logs])
+
+  const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize))
+  const startIndex = (currentPage - 1) * pageSize
+  const endIndex = startIndex + pageSize
+  const paginatedLogs = filteredLogs.slice(startIndex, endIndex)
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [currentPage, totalPages])
 
   const handleFilterChange = (key, value) => {
     setFilters({ ...filters, [key]: value })
@@ -170,7 +184,7 @@ const AuditLogs = () => {
 
         {/* Filters */}
         <div className="mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">Action</label>
               <select
@@ -216,6 +230,22 @@ const AuditLogs = () => {
                 className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Logs per page</label>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(parseInt(e.target.value, 10))
+                  setCurrentPage(1)
+                }}
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#1f1f1f] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -233,7 +263,7 @@ const AuditLogs = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredLogs.map((log) => (
+              {paginatedLogs.map((log) => (
                 <tr key={log.id} className="border-b hover:bg-gray-50">
                   <td className="py-3 px-4 text-sm text-gray-600">{log.timestamp ? log.timestamp.split('.')[0] : ''}</td>
                   <td className="py-3 px-4 font-medium">{log.user_email}</td>
@@ -249,6 +279,29 @@ const AuditLogs = () => {
               ))}
             </tbody>
           </table>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-sm text-gray-500">
+            Showing {filteredLogs.length === 0 ? 0 : startIndex + 1} - {Math.min(endIndex, filteredLogs.length)} of {filteredLogs.length} logs
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 rounded-lg border border-[#3a3a3a] text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#2a2a2a] transition-colors"
+            >
+              Previous
+            </button>
+            <span className="text-sm text-gray-400">Page {currentPage} of {totalPages}</span>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages || filteredLogs.length === 0}
+              className="px-3 py-1.5 rounded-lg border border-[#3a3a3a] text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#2a2a2a] transition-colors"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 

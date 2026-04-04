@@ -107,6 +107,11 @@ const Topbar = () => {
     navigate('/login')
   }
 
+  const handleClearNotifications = () => {
+    setItems([])
+    setUnreadCount(0)
+  }
+
   return (
     <header className="sticky top-0 z-30 border-b border-[#2a2a2a]" style={{ backgroundColor: 'var(--app-sidebar-color)' }}>
       <div className="w-full px-6 py-4 flex items-center justify-between">
@@ -120,10 +125,10 @@ const Topbar = () => {
             <div className="relative">
               <button
                 onClick={() => setOpen((v) => !v)}
-                className="relative p-2.5 rounded-xl border border-[#2a2a2a] bg-[#1f1f1f] text-white hover:text-white hover:border-[#3a3a3a] transition-colors"
+                className="relative p-2 text-white/90 hover:text-white transition-colors"
                 title="AD Notifications"
               >
-                <Bell className="w-5 h-5" />
+                <Bell className="w-6 h-6" />
                 {unreadCount > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center">
                     {unreadCount > 99 ? '99+' : unreadCount}
@@ -135,6 +140,13 @@ const Topbar = () => {
                 <div className="absolute right-0 mt-2 w-[430px] max-w-[90vw] rounded-2xl border border-[#2a2a2a] bg-[#1f1f1f] shadow-2xl overflow-hidden">
                   <div className="px-4 py-3 border-b border-[#2a2a2a] flex items-center justify-between">
                     <p className="text-sm font-semibold text-white">AD Notifications</p>
+                    <button
+                      onClick={handleClearNotifications}
+                      disabled={items.length === 0}
+                      className="text-xs font-medium text-gray-300 hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Clear Notifications
+                    </button>
                   </div>
 
                   <div className="px-4 py-3 border-b border-[#2a2a2a] flex items-center gap-2">
@@ -204,7 +216,11 @@ const Topbar = () => {
               </button>
 
               {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-40 rounded-xl border border-[#3a3a3a] bg-[#1f1f1f] shadow-2xl overflow-hidden z-50">
+                <div className="absolute right-0 mt-2 w-52 rounded-xl border border-[#3a3a3a] bg-[#1f1f1f] shadow-2xl overflow-hidden z-50">
+                  <div className="px-4 py-3 border-b border-[#2a2a2a]">
+                    <p className="text-sm font-semibold text-white truncate">{currentUser?.name || 'User'}</p>
+                    <p className="text-xs text-gray-400 truncate mt-0.5">{currentUser?.role || '-'}</p>
+                  </div>
                   <button
                     onClick={handleLogout}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2a2a2a] transition-colors"

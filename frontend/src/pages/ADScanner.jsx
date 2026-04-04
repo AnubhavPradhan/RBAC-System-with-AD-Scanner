@@ -180,7 +180,11 @@ const ADScanner = () => {
     setTesting(true)
     setTestResult(null)
     try {
-      const { data } = await api.post('/ad-scanner/test-connection', connForm)
+      const payload = {
+        ...connForm,
+        port: connForm.use_ssl ? 636 : 389,
+      }
+      const { data } = await api.post('/ad-scanner/test-connection', payload)
       setTestResult(data)
     } catch (err) {
       setTestResult({ success: false, message: err.response?.data?.detail || err.message })
@@ -192,9 +196,13 @@ const ADScanner = () => {
     setConnecting(true)
     setTestResult(null)
     try {
-      const { data } = await api.post('/ad-scanner/connect', connForm)
+      const payload = {
+        ...connForm,
+        port: connForm.use_ssl ? 636 : 389,
+      }
+      const { data } = await api.post('/ad-scanner/connect', payload)
       if (data.success) {
-        setConnection({ connected: true, config: connForm })
+        setConnection({ connected: true, config: payload })
         setTestResult({ success: true, message: data.message })
       } else {
         setTestResult({ success: false, message: data.message })
@@ -651,9 +659,11 @@ const ADScanner = () => {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-3xl font-bold text-white">Active Directory Scanner</h1>
-          <p className="text-gray-600 mt-1">
-            Scan domain users, detect risky accounts, and enforce access policies
-          </p>
+          {!isConnected && (
+            <p className="text-gray-600 mt-1">
+              Enter your domain controller details to scan domain users, detect risky accounts, and enforce access policies
+            </p>
+          )}
         </div>
         {isConnected && (
           <div className="flex gap-3 items-center">
@@ -690,42 +700,20 @@ const ADScanner = () => {
           CONNECTION FORM (shown when NOT connected)
           ────────────────────────────────────────── */}
       {!isConnected && (
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-            {/* Form Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-6 text-white">
-              <div className="flex items-center gap-3">
-                <Server className="w-8 h-8" />
-                <div>
-                  <h2 className="text-xl font-bold">Connect to Active Directory</h2>
-                  <p className="text-blue-100 text-sm mt-0.5">Enter your domain controller details to start scanning</p>
-                </div>
-              </div>
-            </div>
-
             {/* Form Body */}
-            <div className="p-8 space-y-5">
-              {/* Server IP + Port Row */}
-              <div className="grid grid-cols-3 gap-4">
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Server IP / Hostname</label>
-                  <input
-                    type="text"
-                    placeholder="192.168.1.10 or dc.mylab.local"
-                    value={connForm.server}
-                    onChange={e => setConnForm({ ...connForm, server: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Port</label>
-                  <input
-                    type="number"
-                    value={connForm.port}
-                    onChange={e => setConnForm({ ...connForm, port: parseInt(e.target.value) || 389 })}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
-                  />
-                </div>
+            <div className="p-6 space-y-4">
+              {/* Server Row */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Server IP / Hostname</label>
+                <input
+                  type="text"
+                  placeholder="192.168.1.10 or dc.mylab.local"
+                  value={connForm.server}
+                  onChange={e => setConnForm({ ...connForm, server: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
+                />
               </div>
 
               {/* Domain + Base DN Row */}
@@ -752,58 +740,61 @@ const ADScanner = () => {
                 </div>
               </div>
 
-              {/* Username */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bind Username</label>
-                <input
-                  type="text"
-                  placeholder="MYLAB\Administrator or CN=Admin,CN=Users,DC=mylab,DC=local"
-                  value={connForm.bind_user}
-                  onChange={e => setConnForm({ ...connForm, bind_user: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
-                />
-              </div>
-
-              {/* Password */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bind Password</label>
-                <div className="relative">
+              {/* Username + Password */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bind Username</label>
                   <input
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="Enter password"
-                    value={connForm.bind_password}
-                    onChange={e => setConnForm({ ...connForm, bind_password: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
+                    type="text"
+                    placeholder="MYLAB\Administrator or CN=Admin,CN=Users,DC=mylab,DC=local"
+                    value={connForm.bind_user}
+                    onChange={e => setConnForm({ ...connForm, bind_user: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bind Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Enter password"
+                      value={connForm.bind_password}
+                      onChange={e => setConnForm({ ...connForm, bind_password: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
               </div>
 
               {/* Encryption Mode */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Encryption</label>
-                <select
-                  value={connForm.use_ssl ? 'ldaps' : 'none'}
-                  onChange={e => {
-                    const v = e.target.value
-                    setConnForm({
-                      ...connForm,
-                      use_ssl: v === 'ldaps',
-                      use_start_tls: false,
-                      port: v === 'ldaps' ? 636 : 389,
-                    })
-                  }}
-                  className="w-full border border-[#3a3a3a] rounded-lg bg-[#1f1f1f] px-3 py-2 text-sm text-white placeholder-gray-500 focus:ring-2 focus:ring-white focus:border-white outline-none"
-                >
-                  <option value="none">None (plain LDAP, port 389)</option>
-                  <option value="ldaps">LDAPS / SSL (encrypted, port 636)</option>
-                </select>
+                <p className="text-sm font-semibold text-white">Encryption</p>
+                <div className="flex items-center gap-3 mt-2">
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={connForm.use_ssl}
+                      onChange={e => setConnForm({
+                        ...connForm,
+                        use_ssl: e.target.checked,
+                        use_start_tls: false,
+                        port: e.target.checked ? 636 : 389,
+                      })}
+                    />
+                    <div className="w-12 h-7 bg-[#3a3a3a] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-white rounded-full peer peer-checked:bg-blue-600 transition-colors"></div>
+                    <span className="absolute left-1 top-1 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></span>
+                  </label>
+                  <p className="text-sm text-gray-200">{connForm.use_ssl ? 'LDAPS / SSL (port 636)' : 'LDAP (no SSL, port 389)'}</p>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Port is auto-selected based on encryption: LDAP=389, LDAPS=636.</p>
                 {!connForm.use_ssl && (
                   <p className="text-xs text-amber-600 mt-1">⚠ Without encryption, password operations (create user, reset password) will fail.</p>
                 )}
@@ -1077,13 +1068,13 @@ const ADScanner = () => {
                         <span className="text-sm text-gray-600">{user.risk_flags?.length || 0} flags</span>
                       </td>
                       <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-3">
                           <button onClick={() => openEditUser(user)} title="Edit user"
-                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                            className="text-gray-500 hover:text-blue-600 transition-colors">
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button onClick={() => handleDeleteUser(user.sam_account_name)} title="Delete user"
-                            className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                            className="text-red-500 hover:text-red-700 transition-colors">
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
@@ -1277,13 +1268,13 @@ const ADScanner = () => {
                               </span>
                             </td>
                             <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
-                              <div className="flex items-center gap-1">
+                              <div className="flex items-center gap-3">
                                 <button onClick={() => { setEditGroupCn(group.name); setEditGroupForm({ description: group.description || '' }); setShowEditGroupModal(true) }}
-                                  title="Edit group" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                                  title="Edit group" className="text-gray-500 hover:text-blue-600 transition-colors">
                                   <Pencil className="w-4 h-4" />
                                 </button>
                                 <button onClick={() => handleDeleteGroup(group.name)}
-                                  title="Delete group" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                                  title="Delete group" className="text-red-500 hover:text-red-700 transition-colors">
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
@@ -1393,13 +1384,13 @@ const ADScanner = () => {
                         <td className="py-3 px-4 text-sm text-gray-600">{ou.managed_by || <span className="italic text-gray-300">None</span>}</td>
                         <td className="py-3 px-4 text-sm text-gray-500">{ou.created ? ou.created.replace('T', ' ') : '—'}</td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-3">
                             <button onClick={() => { setEditOuDn(ou.dn); setEditOuForm({ description: ou.description || '' }); setShowEditOuModal(true) }}
-                              title="Edit OU" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                              title="Edit OU" className="text-gray-500 hover:text-blue-600 transition-colors">
                               <Pencil className="w-4 h-4" />
                             </button>
                             <button onClick={() => handleDeleteOu(ou.dn, ou.name)}
-                              title="Delete OU" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                              title="Delete OU" className="text-red-500 hover:text-red-700 transition-colors">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
@@ -1509,13 +1500,13 @@ const ADScanner = () => {
                         <td className="py-3 px-4 text-sm text-gray-600">{c.last_logon || 'Never'}</td>
                         <td className="py-3 px-4 text-sm text-gray-500">{c.description || <span className="italic text-gray-300">None</span>}</td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-3">
                             <button onClick={() => { setEditComputerCn(c.name); setEditComputerForm({ description: c.description || '', enabled: c.enabled }); setShowEditComputerModal(true) }}
-                              title="Edit computer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                              title="Edit computer" className="text-gray-500 hover:text-blue-600 transition-colors">
                               <Pencil className="w-4 h-4" />
                             </button>
                             <button onClick={() => handleDeleteComputer(c.name)}
-                              title="Delete computer" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                              title="Delete computer" className="text-red-500 hover:text-red-700 transition-colors">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
@@ -1780,11 +1771,23 @@ const ADScanner = () => {
                     <td className="py-3 px-4">
                       <span className="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">{m.rbac_role}</span>
                     </td>
-                    <td className="py-3 px-4 space-x-2">
-                      <button onClick={() => { setEditingMapping(m); setMappingForm({ ad_group: m.ad_group, rbac_role: m.rbac_role }); setShowMappingModal(true) }}
-                        className="text-blue-600 hover:text-blue-900 text-sm">Edit</button>
-                      <button onClick={() => handleDeleteMapping(m.id)}
-                        className="text-red-600 hover:text-red-900 text-sm">Delete</button>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => { setEditingMapping(m); setMappingForm({ ad_group: m.ad_group, rbac_role: m.rbac_role }); setShowMappingModal(true) }}
+                          title="Edit mapping"
+                          className="text-gray-500 hover:text-blue-600 transition-colors"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMapping(m.id)}
+                          title="Delete mapping"
+                          className="text-red-500 hover:text-red-700 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
