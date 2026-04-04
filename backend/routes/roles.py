@@ -16,14 +16,24 @@ class RoleBody(BaseModel):
     name: str
     description: Optional[str] = ""
     permissions: List[str] = []
+    time_restricted: Optional[bool] = False
+    allowed_days: List[str] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    access_start_time: Optional[str] = "00:00"
+    access_end_time: Optional[str] = "23:59"
 
 
 def _role_dict(db: Session, role: Role) -> dict:
     perm_names = [p.name for p in role.permissions]
     user_count = db.query(User).filter(User.role == role.name).count()
+    allowed_days = [d for d in (role.allowed_days or "").split(",") if d]
     return {
         "id": role.id, "name": role.name, "description": role.description,
         "created_at": str(role.created_at), "permissions": perm_names, "users": user_count,
+        "time_restricted": bool(role.time_restricted),
+        "allowed_days": allowed_days,
+        "access_start_time": role.access_start_time or "00:00",
+        "access_end_time": role.access_end_time or "23:59",
+        "timezone": "Asia/Kathmandu",
     }
 
 
@@ -41,6 +51,10 @@ def create_role(body: RoleBody, current_user: User = Depends(get_current_user), 
         raise HTTPException(409, "Role already exists")
 
     role = Role(name=body.name, description=body.description or "")
+    role.time_restricted = bool(body.time_restricted)
+    role.allowed_days = ",".join(body.allowed_days or ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+    role.access_start_time = body.access_start_time or "00:00"
+    role.access_end_time = body.access_end_time or "23:59"
     db.add(role)
     db.flush()
 
@@ -63,6 +77,10 @@ def update_role(role_id: int, body: RoleBody, current_user: User = Depends(get_c
 
     role.name = body.name
     role.description = body.description or ""
+    role.time_restricted = bool(body.time_restricted)
+    role.allowed_days = ",".join(body.allowed_days or ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+    role.access_start_time = body.access_start_time or "00:00"
+    role.access_end_time = body.access_end_time or "23:59"
 
     perms = db.query(Permission).filter(Permission.name.in_(body.permissions)).all() if body.permissions else []
     role.permissions = perms

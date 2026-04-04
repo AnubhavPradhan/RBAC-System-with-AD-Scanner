@@ -2,14 +2,62 @@ import React, { useState, useEffect } from 'react'
 import api from '../utils/api'
 
 // ─── CSV Export Helper ─────────────────────────────────────────────────────────
-const exportToCSV = (data, filename) => {
+const formatNepalDateTime = (value) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kathmandu',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
+const exportToCSV = (data, filename, filters) => {
   if (!data.length) return alert('No data to export')
-  const headers = Object.keys(data[0])
-  const rows = data.map(row =>
-    headers.map(h => `"${String(row[h] ?? '').replace(/"/g, '""')}"`).join(',')
-  )
-  const csv = [headers.join(','), ...rows].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
+
+  const activeFilters = []
+  if (filters.action && filters.action !== 'All') activeFilters.push(`Action=${filters.action}`)
+  if (filters.user) activeFilters.push(`User contains "${filters.user}"`)
+  if (filters.dateFrom) activeFilters.push(`From=${filters.dateFrom}`)
+  if (filters.dateTo) activeFilters.push(`To=${filters.dateTo}`)
+
+  const header = ['ID', 'Date (NPT)', 'Time (NPT)', 'User Email', 'Action', 'Resource', 'Severity', 'Details']
+  const rows = data.map((log) => {
+    const ts = formatNepalDateTime(log.Timestamp)
+    const [datePart, timePart] = String(ts).split(', ')
+    return [
+      log.ID,
+      datePart || '-',
+      timePart || '-',
+      log.User || '-',
+      log.Action || '-',
+      log.Resource || '-',
+      log.Severity || '-',
+      log.Details || '-',
+    ]
+  })
+
+  const csvRows = [
+    ['Report: Audit Logs'],
+    [`Generated (NPT): ${formatNepalDateTime(new Date().toISOString())}`],
+    [`Total Records: ${data.length}`],
+    [`Filters: ${activeFilters.length ? activeFilters.join(' | ') : 'None'}`],
+    [],
+    header,
+    ...rows,
+  ]
+
+  const csv = csvRows
+    .map((cols) => cols.map((col) => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n')
+
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = filename; a.click()
@@ -111,7 +159,7 @@ const AuditLogs = () => {
       Details: l.details,
       Severity: l.severity
     }))
-    exportToCSV(exportData, 'audit-logs.csv')
+    exportToCSV(exportData, 'audit-logs.csv', filters)
   }
 
   const handleExportJSON = () => {

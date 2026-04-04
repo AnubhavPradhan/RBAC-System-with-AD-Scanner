@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { showAppPopup } from './popup'
 
 const api = axios.create({
   baseURL: '/api',
@@ -22,6 +23,15 @@ api.interceptors.response.use(
       localStorage.removeItem('rbac-token')
       localStorage.removeItem('rbac-current-user')
       window.location.href = '/login'
+    }
+    if (error.response?.status === 403) {
+      const detail = String(error.response?.data?.detail || error.response?.data?.error || '')
+      if (detail.toLowerCase().includes('time-based policy')) {
+        localStorage.removeItem('rbac-token')
+        localStorage.removeItem('rbac-current-user')
+        showAppPopup('Access denied: your account is outside the allowed Nepal time window.', true)
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(error)
   }
