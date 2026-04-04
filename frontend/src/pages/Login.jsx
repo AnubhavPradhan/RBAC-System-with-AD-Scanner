@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import PopupHost from '../components/PopupHost'
 
 /* User login */
 const Login = () => {
@@ -51,6 +52,7 @@ const Login = () => {
   
   return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: 'var(--app-bg-color)' }}>
+      <PopupHost />
       <div className="rounded-2xl shadow-2xl w-full max-w-md p-8 border" style={{ backgroundColor: 'var(--app-surface-color)', borderColor: 'var(--app-border-color)' }}>
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-white">Enhanced RBAC</h1>
