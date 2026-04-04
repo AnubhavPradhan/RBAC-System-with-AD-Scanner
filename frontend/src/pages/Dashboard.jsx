@@ -168,7 +168,7 @@ const Dashboard = () => {
 
       <div className="rounded-2xl border shadow-md p-4 mb-6 flex items-center justify-between" style={SURFACE_STYLE}>
         <div>
-          <p className="text-sm text-blue-200">Windows Server AD Connection</p>
+          <p className="text-sm text-white">Windows Server AD Connection</p>
           <div className="flex flex-wrap items-center gap-2 mt-0.5">
             <p className="text-base font-semibold text-blue-50">
               {adStatus.loading ? 'Checking status...' : adStatus.connected ? 'Connected' : 'Offline'}

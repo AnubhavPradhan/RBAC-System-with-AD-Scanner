@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, Filter, Shield } from 'lucide-react'
+import { Bell, ChevronDown, Filter, Shield } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../utils/api'
@@ -114,7 +114,7 @@ const Topbar = () => {
 
   return (
     <header className="sticky top-0 z-30 border-b border-[#2a2a2a]" style={{ backgroundColor: 'var(--app-sidebar-color)' }}>
-      <div className="w-full px-6 py-4 flex items-center justify-between">
+      <div className="w-full px-6 py-3 flex items-center justify-between">
         <div className="text-2xl font-bold text-white flex items-center gap-2.5">
           <Shield className="w-7 h-7 text-white" />
           <span>RBAC & AD Scanner</span>
@@ -128,7 +128,7 @@ const Topbar = () => {
                 className="relative p-2 text-white/90 hover:text-white transition-colors"
                 title="AD Notifications"
               >
-                <Bell className="w-6 h-6" />
+                <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center">
                     {unreadCount > 99 ? '99+' : unreadCount}
@@ -201,35 +201,36 @@ const Topbar = () => {
             </div>
           )}
 
-          <div className="flex items-center space-x-3 min-w-0">
-            <div className="min-w-0 text-right">
-              <p className="text-sm font-semibold text-white truncate">{currentUser?.name || 'User'}</p>
-              <p className="text-xs text-gray-400 truncate">{currentUser?.role || '-'}</p>
-            </div>
-            <div className="relative">
-              <button
-                onClick={() => setUserMenuOpen((v) => !v)}
-                className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 transition-colors"
-                title="Account menu"
-              >
+          <div className="relative min-w-0">
+            <button
+              onClick={() => setUserMenuOpen((v) => !v)}
+              className="flex items-center gap-2.5 rounded-xl px-2 py-1 hover:bg-white/5 transition-colors"
+              title="Account menu"
+            >
+              <div className="w-10 h-10 rounded-full bg-[#d8d8c8] text-[#222] flex items-center justify-center font-semibold text-[17px] flex-shrink-0">
                 {currentUser?.name?.charAt(0)?.toUpperCase() || 'U'}
-              </button>
+              </div>
+              <div className="min-w-0 text-left leading-tight">
+                <p className="text-[14px] font-semibold text-white truncate">{currentUser?.name || 'User'}</p>
+                <p className="text-[12px] text-gray-400 truncate mt-0.5">{currentUser?.role || '-'}</p>
+              </div>
+              <ChevronDown className="w-4 h-4 text-gray-200 flex-shrink-0" />
+            </button>
 
-              {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-52 rounded-xl border border-[#3a3a3a] bg-[#1f1f1f] shadow-2xl overflow-hidden z-50">
-                  <div className="px-4 py-3 border-b border-[#2a2a2a]">
-                    <p className="text-sm font-semibold text-white truncate">{currentUser?.name || 'User'}</p>
-                    <p className="text-xs text-gray-400 truncate mt-0.5">{currentUser?.role || '-'}</p>
-                  </div>
-                  <button
-                    onClick={handleLogout}
-                    className="w-full text-left px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2a2a2a] transition-colors"
-                  >
-                    Logout
-                  </button>
+            {userMenuOpen && (
+              <div className="absolute right-0 mt-2 w-52 rounded-xl border border-[#3a3a3a] bg-[#1f1f1f] shadow-2xl overflow-hidden z-50">
+                <div className="px-4 py-3 border-b border-[#2a2a2a]">
+                  <p className="text-sm font-semibold text-white truncate">{currentUser?.name || 'User'}</p>
+                  <p className="text-xs text-gray-400 truncate mt-0.5">{currentUser?.role || '-'}</p>
                 </div>
-              )}
-            </div>
+                <button
+                  onClick={handleLogout}
+                  className="w-full text-left px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2a2a2a] transition-colors"
+                >
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -52,7 +52,7 @@ export const AuthProvider = ({ children }) => {
       setCurrentUser(data.user)
       return { success: true }
     } catch (err) {
-      return { success: false, error: err.response?.data?.error || 'Login failed' }
+      return { success: false, error: err.response?.data?.detail || err.response?.data?.error || 'Login failed' }
     }
   }
 
@@ -64,7 +64,7 @@ export const AuthProvider = ({ children }) => {
       setCurrentUser(data.user)
       return { success: true }
     } catch (err) {
-      return { success: false, error: err.response?.data?.error || 'Signup failed' }
+      return { success: false, error: err.response?.data?.detail || err.response?.data?.error || 'Signup failed' }
     }
   }
 

@@ -24,7 +24,7 @@ const Sidebar = () => {
 
   return (
     <aside
-      className="fixed top-[73px] left-0 w-64 h-[calc(100vh-73px)] text-white border-r border-[#2a2a2a] overflow-y-auto"
+      className="fixed top-[76px] left-0 w-64 h-[calc(100vh-76px)] text-white border-r border-[#2a2a2a] overflow-y-auto"
       style={{ backgroundColor: 'var(--app-sidebar-color)' }}
     >
       <div className="p-4">
