@@ -48,6 +48,10 @@ class Role(Base):
     name = Column(String(100), unique=True, nullable=False)
     description = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
+    time_restricted = Column(Boolean, default=False)
+    allowed_days = Column(String(100), default="Mon,Tue,Wed,Thu,Fri,Sat,Sun")
+    access_start_time = Column(String(5), default="00:00")
+    access_end_time = Column(String(5), default="23:59")
     permissions = relationship("Permission", secondary=role_permissions, back_populates="roles")
 
 
@@ -71,6 +75,10 @@ class User(Base):
     password = Column(String(200), nullable=False)
     role = Column(String(100), default="Viewer")
     status = Column(String(20), default="Active")
+    time_override_enabled = Column(Boolean, default=False)
+    allowed_days = Column(String(100), default="Mon,Tue,Wed,Thu,Fri,Sat,Sun")
+    access_start_time = Column(String(5), default="00:00")
+    access_end_time = Column(String(5), default="23:59")
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
 
@@ -176,6 +184,46 @@ def init_db():
             pass  # Column already exists
         try:
             conn.execute(__import__('sqlalchemy').text("ALTER TABLE ad_connection_config ADD COLUMN use_start_tls BOOLEAN DEFAULT 0"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(__import__('sqlalchemy').text("ALTER TABLE roles ADD COLUMN time_restricted BOOLEAN DEFAULT 0"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(__import__('sqlalchemy').text("ALTER TABLE roles ADD COLUMN allowed_days VARCHAR(100) DEFAULT 'Mon,Tue,Wed,Thu,Fri,Sat,Sun'"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(__import__('sqlalchemy').text("ALTER TABLE roles ADD COLUMN access_start_time VARCHAR(5) DEFAULT '00:00'"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(__import__('sqlalchemy').text("ALTER TABLE roles ADD COLUMN access_end_time VARCHAR(5) DEFAULT '23:59'"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(__import__('sqlalchemy').text("ALTER TABLE users ADD COLUMN time_override_enabled BOOLEAN DEFAULT 0"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(__import__('sqlalchemy').text("ALTER TABLE users ADD COLUMN allowed_days VARCHAR(100) DEFAULT 'Mon,Tue,Wed,Thu,Fri,Sat,Sun'"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(__import__('sqlalchemy').text("ALTER TABLE users ADD COLUMN access_start_time VARCHAR(5) DEFAULT '00:00'"))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute(__import__('sqlalchemy').text("ALTER TABLE users ADD COLUMN access_end_time VARCHAR(5) DEFAULT '23:59'"))
             conn.commit()
         except Exception:
             pass  # Column already exists

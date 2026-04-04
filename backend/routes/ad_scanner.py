@@ -18,6 +18,9 @@ from ad_scanner.scanner import run_scan
 
 router = APIRouter(prefix="/api/ad-scanner", tags=["AD Scanner"])
 
+LDAP_CONNECT_TIMEOUT_SECONDS = 3
+LDAP_RECEIVE_TIMEOUT_SECONDS = 3
+
 
 class _NotificationBroker:
     """Simple in-memory pub/sub for AD notifications."""
@@ -497,6 +500,50 @@ def get_connection(current_user: User = Depends(get_current_user), db: Session =
     }
 
 
+@router.get("/status")
+def ad_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return AD connectivity state for UI status badges/cards.
+
+    This endpoint is intentionally non-throwing for offline AD so pages like
+    Dashboard can always render without surfacing cross-page connection errors.
+    """
+    cfg = db.query(ADConnectionConfig).first()
+    if not cfg:
+        return {
+            "configured": False,
+            "connected": False,
+            "message": "AD connection is not configured",
+        }
+
+    if not cfg.is_connected:
+        return {
+            "configured": True,
+            "connected": False,
+            "message": "AD connection is configured but currently disconnected",
+            "server": cfg.server,
+            "port": cfg.port,
+        }
+
+    try:
+        conn, _ = _get_ldap_conn(db, connect_timeout=2, receive_timeout=2)
+        conn.unbind()
+        return {
+            "configured": True,
+            "connected": True,
+            "message": "AD server is reachable",
+            "server": cfg.server,
+            "port": cfg.port,
+        }
+    except HTTPException as exc:
+        return {
+            "configured": True,
+            "connected": False,
+            "message": str(exc.detail),
+            "server": cfg.server,
+            "port": cfg.port,
+        }
+
+
 @router.post("/test-connection")
 def test_connection(body: ADConnectRequest, current_user: User = Depends(get_current_user)):
     """Test AD connection without saving."""
@@ -512,7 +559,7 @@ def test_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             use_ssl=body.use_ssl,
             tls=tls_config,
             get_info=ALL,
-            connect_timeout=10,
+            connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS,
         )
 
         auto = 'TLS_BEFORE_BIND' if (body.use_start_tls and not body.use_ssl) else True
@@ -522,7 +569,7 @@ def test_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             password=body.bind_password,
             auto_bind=auto,
             auto_referrals=False,
-            receive_timeout=10,
+            receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS,
         )
         enc = 'StartTLS' if body.use_start_tls else ('SSL' if body.use_ssl else 'plain')
         info = server.info
@@ -552,7 +599,7 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             use_ssl=body.use_ssl,
             tls=tls_config,
             get_info=ALL,
-            connect_timeout=10,
+            connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS,
         )
 
         auto = 'TLS_BEFORE_BIND' if (body.use_start_tls and not body.use_ssl) else True
@@ -562,7 +609,7 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             password=body.bind_password,
             auto_bind=auto,
             auto_referrals=False,
-            receive_timeout=10,
+            receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS,
         )
         conn.unbind()
         connected = True
@@ -955,11 +1002,11 @@ def list_ad_groups(current_user: User = Depends(get_current_user), db: Session =
             tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
             server = Server(
                 cfg.server, port=cfg.port, use_ssl=cfg.use_ssl,
-                tls=tls_config, get_info=ALL, connect_timeout=10,
+                tls=tls_config, get_info=ALL, connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS,
             )
             conn = Connection(
                 server, user=cfg.bind_user, password=cfg.bind_password,
-                auto_bind=True, auto_referrals=False, receive_timeout=15,
+                auto_bind=True, auto_referrals=False, receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS,
             )
 
             conn.search(
@@ -1091,11 +1138,11 @@ def sync_rbac_to_ad(current_user: User = Depends(get_current_user), db: Session 
 
         server = Server(
             cfg.server, port=cfg.port, use_ssl=cfg.use_ssl,
-            tls=tls_config, get_info=ALL, connect_timeout=10,
+            tls=tls_config, get_info=ALL, connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS,
         )
         conn = Connection(
             server, user=cfg.bind_user, password=cfg.bind_password,
-            auto_bind=True, auto_referrals=False, receive_timeout=15,
+            auto_bind=True, auto_referrals=False, receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS,
         )
 
         for rbac_user in rbac_users:
@@ -1219,8 +1266,8 @@ def list_ous(current_user: User = Depends(get_current_user), db: Session = Depen
         import ssl as ssl_mod
 
         tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
-        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
-        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=15)
+        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS)
 
         conn.search(
             search_base=cfg.base_dn,
@@ -1275,8 +1322,8 @@ def list_computers(current_user: User = Depends(get_current_user), db: Session =
         import ssl as ssl_mod
 
         tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
-        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
-        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=15)
+        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS)
 
         conn.search(
             search_base=cfg.base_dn,
@@ -1346,8 +1393,8 @@ def list_domain_controllers(current_user: User = Depends(get_current_user), db: 
         import ssl as ssl_mod
 
         tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
-        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
-        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=15)
+        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS)
 
         # primaryGroupID=516 means Domain Controllers
         conn.search(
@@ -1406,18 +1453,45 @@ def list_domain_controllers(current_user: User = Depends(get_current_user), db: 
 # ══════════════════════════════════════════
 # HELPER: get a bound LDAP connection
 # ══════════════════════════════════════════
-def _get_ldap_conn(db: Session):
+def _get_ldap_conn(
+    db: Session,
+    connect_timeout: int = LDAP_CONNECT_TIMEOUT_SECONDS,
+    receive_timeout: int = LDAP_RECEIVE_TIMEOUT_SECONDS,
+):
     """Return (conn, cfg) or raise 400."""
     cfg = db.query(ADConnectionConfig).first()
     if not cfg or not cfg.is_connected:
-        raise HTTPException(400, "No active AD connection.")
+        raise HTTPException(503, "AD server offline or not configured")
     from ldap3 import Server, Connection, ALL, Tls
     import ssl as ssl_mod
     tls_config = Tls(validate=ssl_mod.CERT_NONE, version=ssl_mod.PROTOCOL_TLS) if (cfg.use_ssl or cfg.use_start_tls) else None
-    server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
+    server = Server(
+        cfg.server,
+        port=cfg.port,
+        use_ssl=cfg.use_ssl,
+        tls=tls_config,
+        get_info=ALL,
+        connect_timeout=connect_timeout,
+    )
     auto = 'TLS_BEFORE_BIND' if (cfg.use_start_tls and not cfg.use_ssl) else True
-    conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=auto, auto_referrals=False, receive_timeout=15)
-    return conn, cfg
+    try:
+        conn = Connection(
+            server,
+            user=cfg.bind_user,
+            password=cfg.bind_password,
+            auto_bind=auto,
+            auto_referrals=False,
+            receive_timeout=receive_timeout,
+        )
+        return conn, cfg
+    except Exception:
+        # Mark stale connection state so UI can immediately reflect offline AD.
+        cfg.is_connected = False
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(503, "AD server offline")
 
 
 # ──────────────────────────────────────────
@@ -2187,5 +2261,6 @@ def delete_computer(comp_cn: str, current_user: User = Depends(get_current_user)
             conn.unbind()
         except:
             pass
+
 
 

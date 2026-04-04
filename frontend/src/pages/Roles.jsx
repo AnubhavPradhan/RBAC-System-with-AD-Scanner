@@ -2,6 +2,15 @@ import React, { useState, useEffect } from 'react'
 import { Pencil, Trash2 } from 'lucide-react'
 import api from '../utils/api'
 
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+const formatPermissionLabel = (name = '') =>
+  name
+    .split('_')
+    .filter(Boolean)
+    .map((part) => (part.toLowerCase() === 'ad' ? 'AD' : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(' ')
+
 const Roles = () => {
   const [showModal, setShowModal] = useState(false)
   const [editingRole, setEditingRole] = useState(null)
@@ -14,7 +23,11 @@ const Roles = () => {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    permissions: []
+    permissions: [],
+    time_restricted: false,
+    allowed_days: [...DAYS],
+    access_start_time: '09:00',
+    access_end_time: '18:00'
   })
 
   useEffect(() => {
@@ -60,7 +73,15 @@ const Roles = () => {
         const { data } = await api.post('/roles', formData)
         setRoles([...roles, data])
       }
-      setFormData({ name: '', description: '', permissions: [] })
+      setFormData({
+        name: '',
+        description: '',
+        permissions: [],
+        time_restricted: false,
+        allowed_days: [...DAYS],
+        access_start_time: '09:00',
+        access_end_time: '18:00'
+      })
       setEditingRole(null)
       setShowModal(false)
     } catch (err) {
@@ -73,15 +94,35 @@ const Roles = () => {
     setFormData({
       name: role.name,
       description: role.description,
-      permissions: [...(role.permissions || [])]
+      permissions: [...(role.permissions || [])],
+      time_restricted: !!role.time_restricted,
+      allowed_days: Array.isArray(role.allowed_days) && role.allowed_days.length > 0 ? [...role.allowed_days] : [...DAYS],
+      access_start_time: role.access_start_time || '09:00',
+      access_end_time: role.access_end_time || '18:00'
     })
     setShowModal(true)
   }
 
   const handleAddNew = () => {
     setEditingRole(null)
-    setFormData({ name: '', description: '', permissions: [] })
+    setFormData({
+      name: '',
+      description: '',
+      permissions: [],
+      time_restricted: false,
+      allowed_days: [...DAYS],
+      access_start_time: '09:00',
+      access_end_time: '18:00'
+    })
     setShowModal(true)
+  }
+
+  const toggleAllowedDay = (day) => {
+    if (formData.allowed_days.includes(day)) {
+      setFormData({ ...formData, allowed_days: formData.allowed_days.filter(d => d !== day) })
+    } else {
+      setFormData({ ...formData, allowed_days: [...formData.allowed_days, day] })
+    }
   }
 
   const handleDeleteRole = (role) => {
@@ -104,7 +145,7 @@ const Roles = () => {
   return (
     <div>
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-blue-100">Roles Management</h1>
+        <h1 className="text-3xl font-bold text-white">Roles Management</h1>
         <button
           onClick={handleAddNew}
           className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
@@ -148,7 +189,7 @@ const Roles = () => {
                     key={index}
                     className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full"
                   >
-                    {permission}
+                    {formatPermissionLabel(permission)}
                   </span>
                 ))}
               </div>
@@ -158,6 +199,11 @@ const Roles = () => {
               <p className="text-sm text-gray-600">
                 <span className="font-semibold">{role.users}</span> users assigned
               </p>
+              <p className="text-xs text-gray-500 mt-2">
+                {role.time_restricted
+                  ? `NPT Access: ${(role.allowed_days || []).join(', ')} ${role.access_start_time}-${role.access_end_time}`
+                  : 'NPT Access: No time restriction'}
+              </p>
             </div>
           </div>
         ))}
@@ -165,8 +211,8 @@ const Roles = () => {
 
       {/* Add Role Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-8 max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-8 w-[min(94vw,860px)] max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold mb-6 text-gray-800">
               {editingRole ? 'Edit Role' : 'Add New Role'}
             </h2>
@@ -177,7 +223,7 @@ const Roles = () => {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                   required
                 />
               </div>
@@ -186,7 +232,7 @@ const Roles = () => {
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                   rows="3"
                   required
                 />
@@ -200,13 +246,68 @@ const Roles = () => {
                         type="checkbox"
                         checked={formData.permissions.includes(permission)}
                         onChange={() => handlePermissionToggle(permission)}
-                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-white"
                       />
-                      <span className="ml-2 text-gray-700">{permission}</span>
+                      <span className="ml-2 text-gray-700">{formatPermissionLabel(permission)}</span>
                     </label>
                   ))}
                 </div>
               </div>
+              <div className="mb-4 rounded-lg border border-gray-200 p-3 bg-gray-50">
+                <p className="text-xs font-semibold text-gray-700">Timezone</p>
+                <p className="text-sm text-gray-600">Asia/Kathmandu (Nepal Time)</p>
+              </div>
+              <div className="mb-4">
+                <label className="flex items-center gap-2 text-gray-700 text-sm font-bold mb-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.time_restricted}
+                    onChange={(e) => setFormData({ ...formData, time_restricted: e.target.checked })}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-white"
+                  />
+                  Enable time-based access policy
+                </label>
+              </div>
+              {formData.time_restricted && (
+                <>
+                  <div className="mb-4">
+                    <label className="block text-gray-700 text-sm font-bold mb-2">Allowed Days (NPT)</label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {DAYS.map((day) => (
+                        <label key={day} className="flex items-center text-sm text-gray-700 gap-1">
+                          <input
+                            type="checkbox"
+                            checked={formData.allowed_days.includes(day)}
+                            onChange={() => toggleAllowedDay(day)}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-white"
+                          />
+                          {day}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mb-6 grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-gray-700 text-sm font-bold mb-2">Start Time (NPT)</label>
+                      <input
+                        type="time"
+                        value={formData.access_start_time}
+                        onChange={(e) => setFormData({ ...formData, access_start_time: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-gray-700 text-sm font-bold mb-2">End Time (NPT)</label>
+                      <input
+                        type="time"
+                        value={formData.access_end_time}
+                        onChange={(e) => setFormData({ ...formData, access_end_time: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
               <div className="flex justify-end space-x-3">
                 <button
                   type="button"

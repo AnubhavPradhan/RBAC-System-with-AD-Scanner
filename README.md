@@ -1,4 +1,4 @@
-# ERBAC with Active Directory Scanner
+# RBAC with Active Directory Scanner
 
 A full-stack **Enhanced Role-Based Access Control (RBAC)** system with an integrated **Active Directory Scanner** module for enterprise security auditing.
 

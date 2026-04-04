@@ -2,14 +2,62 @@ import React, { useState, useEffect } from 'react'
 import api from '../utils/api'
 
 // ─── CSV Export Helper ─────────────────────────────────────────────────────────
-const exportToCSV = (data, filename) => {
+const formatNepalDateTime = (value) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kathmandu',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
+const exportToCSV = (data, filename, filters) => {
   if (!data.length) return alert('No data to export')
-  const headers = Object.keys(data[0])
-  const rows = data.map(row =>
-    headers.map(h => `"${String(row[h] ?? '').replace(/"/g, '""')}"`).join(',')
-  )
-  const csv = [headers.join(','), ...rows].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
+
+  const activeFilters = []
+  if (filters.action && filters.action !== 'All') activeFilters.push(`Action=${filters.action}`)
+  if (filters.user) activeFilters.push(`User contains "${filters.user}"`)
+  if (filters.dateFrom) activeFilters.push(`From=${filters.dateFrom}`)
+  if (filters.dateTo) activeFilters.push(`To=${filters.dateTo}`)
+
+  const header = ['ID', 'Date (NPT)', 'Time (NPT)', 'User Email', 'Action', 'Resource', 'Severity', 'Details']
+  const rows = data.map((log) => {
+    const ts = formatNepalDateTime(log.Timestamp)
+    const [datePart, timePart] = String(ts).split(', ')
+    return [
+      log.ID,
+      datePart || '-',
+      timePart || '-',
+      log.User || '-',
+      log.Action || '-',
+      log.Resource || '-',
+      log.Severity || '-',
+      log.Details || '-',
+    ]
+  })
+
+  const csvRows = [
+    ['Report: Audit Logs'],
+    [`Generated (NPT): ${formatNepalDateTime(new Date().toISOString())}`],
+    [`Total Records: ${data.length}`],
+    [`Filters: ${activeFilters.length ? activeFilters.join(' | ') : 'None'}`],
+    [],
+    header,
+    ...rows,
+  ]
+
+  const csv = csvRows
+    .map((cols) => cols.map((col) => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n')
+
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = filename; a.click()
@@ -29,6 +77,8 @@ const exportToJSON = (data, filename) => {
 const AuditLogs = () => {
   const [logs, setLogs] = useState([])
   const [filteredLogs, setFilteredLogs] = useState([])
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [filters, setFilters] = useState({
     action: 'All',
@@ -68,7 +118,19 @@ const AuditLogs = () => {
       filtered = filtered.filter(log => log.timestamp <= filters.dateTo + ' 23:59:59')
     }
     setFilteredLogs(filtered)
+    setCurrentPage(1)
   }, [filters, logs])
+
+  const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize))
+  const startIndex = (currentPage - 1) * pageSize
+  const endIndex = startIndex + pageSize
+  const paginatedLogs = filteredLogs.slice(startIndex, endIndex)
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [currentPage, totalPages])
 
   const handleFilterChange = (key, value) => {
     setFilters({ ...filters, [key]: value })
@@ -97,7 +159,7 @@ const AuditLogs = () => {
       Details: l.details,
       Severity: l.severity
     }))
-    exportToCSV(exportData, 'audit-logs.csv')
+    exportToCSV(exportData, 'audit-logs.csv', filters)
   }
 
   const handleExportJSON = () => {
@@ -122,7 +184,7 @@ const AuditLogs = () => {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-blue-100 mb-8">Audit Logs</h1>
+      <h1 className="text-3xl font-bold text-white mb-8">Audit Logs</h1>
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -170,13 +232,13 @@ const AuditLogs = () => {
 
         {/* Filters */}
         <div className="mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Action</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Action</label>
               <select
                 value={filters.action}
                 onChange={(e) => handleFilterChange('action', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#1f1f1f] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
               >
                 <option>All</option>
                 <option>Login</option>
@@ -189,32 +251,48 @@ const AuditLogs = () => {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">User</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">User</label>
               <input
                 type="text"
                 value={filters.user}
                 onChange={(e) => handleFilterChange('user', e.target.value)}
                 placeholder="Search by user email..."
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">From Date</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">From Date</label>
               <input
                 type="date"
                 value={filters.dateFrom}
                 onChange={(e) => handleFilterChange('dateFrom', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">To Date</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">To Date</label>
               <input
                 type="date"
                 value={filters.dateTo}
                 onChange={(e) => handleFilterChange('dateTo', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Logs per page</label>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(parseInt(e.target.value, 10))
+                  setCurrentPage(1)
+                }}
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#1f1f1f] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
             </div>
           </div>
         </div>
@@ -233,7 +311,7 @@ const AuditLogs = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredLogs.map((log) => (
+              {paginatedLogs.map((log) => (
                 <tr key={log.id} className="border-b hover:bg-gray-50">
                   <td className="py-3 px-4 text-sm text-gray-600">{log.timestamp ? log.timestamp.split('.')[0] : ''}</td>
                   <td className="py-3 px-4 font-medium">{log.user_email}</td>
@@ -249,6 +327,29 @@ const AuditLogs = () => {
               ))}
             </tbody>
           </table>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-sm text-gray-500">
+            Showing {filteredLogs.length === 0 ? 0 : startIndex + 1} - {Math.min(endIndex, filteredLogs.length)} of {filteredLogs.length} logs
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 rounded-lg border border-[#3a3a3a] text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#2a2a2a] transition-colors"
+            >
+              Previous
+            </button>
+            <span className="text-sm text-gray-400">Page {currentPage} of {totalPages}</span>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages || filteredLogs.length === 0}
+              className="px-3 py-1.5 rounded-lg border border-[#3a3a3a] text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#2a2a2a] transition-colors"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 

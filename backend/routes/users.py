@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from database import get_db, User, AuditLog
-from auth import get_current_user, hash_password
+from auth import get_current_user, hash_password, validate_password_strength
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
@@ -19,6 +19,10 @@ class UserCreate(BaseModel):
     password: Optional[str] = "changeme123"
     role: Optional[str] = "Viewer"
     status: Optional[str] = "Active"
+    time_override_enabled: Optional[bool] = False
+    allowed_days: Optional[list[str]] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    access_start_time: Optional[str] = "00:00"
+    access_end_time: Optional[str] = "23:59"
 
 
 class UserUpdate(BaseModel):
@@ -28,14 +32,24 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
     role: str
     status: str
+    time_override_enabled: Optional[bool] = False
+    allowed_days: Optional[list[str]] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    access_start_time: Optional[str] = "00:00"
+    access_end_time: Optional[str] = "23:59"
 
 
 def _user_dict(u: User) -> dict:
+    allowed_days = [d for d in (u.allowed_days or "").split(",") if d]
     return {
         "id": u.id, "name": u.name, "username": u.username,
         "email": u.email, "role": u.role, "status": u.status,
         "created_at": str(u.created_at),
         "last_login": str(u.last_login).split('.')[0] if u.last_login else None,
+        "time_override_enabled": bool(u.time_override_enabled),
+        "allowed_days": allowed_days,
+        "access_start_time": u.access_start_time or "00:00",
+        "access_end_time": u.access_end_time or "23:59",
+        "timezone": "Asia/Kathmandu",
     }
 
 
@@ -53,11 +67,19 @@ def create_user(body: UserCreate, current_user: User = Depends(get_current_user)
         raise HTTPException(400, "Name and email are required")
     if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(409, "Email already exists")
+    raw_password = body.password or "changeme123"
+    is_valid, msg = validate_password_strength(raw_password)
+    if not is_valid:
+        raise HTTPException(400, msg)
 
     new_user = User(
         name=body.name, username=body.username or None, email=body.email,
-        password=hash_password(body.password or "changeme123"),
+        password=hash_password(raw_password),
         role=body.role or "Viewer", status=body.status or "Active",
+        time_override_enabled=bool(body.time_override_enabled),
+        allowed_days=",".join(body.allowed_days or ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]),
+        access_start_time=body.access_start_time or "00:00",
+        access_end_time=body.access_end_time or "23:59",
     )
     db.add(new_user)
     db.flush()
@@ -82,7 +104,14 @@ def update_user(user_id: int, body: UserUpdate, current_user: User = Depends(get
     user.email = body.email
     user.role = body.role
     user.status = body.status
+    user.time_override_enabled = bool(body.time_override_enabled)
+    user.allowed_days = ",".join(body.allowed_days or ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+    user.access_start_time = body.access_start_time or "00:00"
+    user.access_end_time = body.access_end_time or "23:59"
     if body.password and body.password.strip():
+        is_valid, msg = validate_password_strength(body.password)
+        if not is_valid:
+            raise HTTPException(400, msg)
         user.password = hash_password(body.password)
 
     db.add(AuditLog(user_email=current_user.email, action="Update", resource="User",

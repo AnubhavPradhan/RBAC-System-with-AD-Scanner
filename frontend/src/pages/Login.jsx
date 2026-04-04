@@ -1,10 +1,13 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import PopupHost from '../components/PopupHost'
 
 /* User login */
 const Login = () => {
   const [isLogin, setIsLogin] = useState(true)
+  const [showPassword, setShowPassword] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     username: '',
@@ -49,6 +52,7 @@ const Login = () => {
   
   return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: 'var(--app-bg-color)' }}>
+      <PopupHost />
       <div className="rounded-2xl shadow-2xl w-full max-w-md p-8 border" style={{ backgroundColor: 'var(--app-surface-color)', borderColor: 'var(--app-border-color)' }}>
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-white">Enhanced RBAC</h1>
@@ -74,8 +78,7 @@ const Login = () => {
                 name="name"
                 value={formData.name}
                 onChange={handleChange}
-                className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-white placeholder:text-[#9aa3b2]"
-                style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}
+                className="w-full px-4 py-3 border border-[#3a3a3a] rounded-lg bg-[#323232] text-white focus:ring-2 focus:ring-white focus:border-transparent outline-none placeholder:text-[#9aa3b2]"
                 placeholder="Enter your name"
               />
             </div>
@@ -89,8 +92,7 @@ const Login = () => {
                 name="username"
                 value={formData.username}
                 onChange={handleChange}
-                className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-white placeholder:text-[#9aa3b2]"
-                style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}
+                className="w-full px-4 py-3 border border-[#3a3a3a] rounded-lg bg-[#323232] text-white focus:ring-2 focus:ring-white focus:border-transparent outline-none placeholder:text-[#9aa3b2]"
                 placeholder="Choose a username"
               />
             </div>
@@ -105,8 +107,7 @@ const Login = () => {
               name="email"
               value={formData.email}
               onChange={handleChange}
-              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-white placeholder:text-[#9aa3b2]"
-              style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}
+              className="w-full px-4 py-3 border border-[#3a3a3a] rounded-lg bg-[#323232] text-white focus:ring-2 focus:ring-white focus:border-transparent outline-none placeholder:text-[#9aa3b2]"
               placeholder={isLogin ? 'Enter your email or username' : 'Enter your email'}
               required
             />
@@ -114,16 +115,24 @@ const Login = () => {
 
           <div>
             <label className="block text-[#d8deea] font-medium mb-2">Password</label>
-            <input
-              type="password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-white placeholder:text-[#9aa3b2]"
-              style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}
-              placeholder="Enter your password"
-              required
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                name="password"
+                value={formData.password}
+                onChange={handleChange}
+                className="w-full px-4 py-3 pr-10 border border-[#3a3a3a] rounded-lg bg-[#323232] text-white focus:ring-2 focus:ring-white focus:border-transparent outline-none placeholder:text-[#9aa3b2]"
+                placeholder="Enter your password"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9aa3b2] hover:text-white transition-colors"
+              >
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
 
           <button

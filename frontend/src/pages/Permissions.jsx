@@ -1,49 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Lock, CheckCircle, XCircle, Pencil, Trash2 } from 'lucide-react'
+import { Pencil } from 'lucide-react'
 import api from '../utils/api'
 
-const SURFACE_STYLE = {
-  backgroundColor: 'var(--app-surface-color)',
-  borderColor: 'var(--app-border-color)'
-}
-
-const STAT_META = [
-  {
-    key: 'total',
-    label: 'Total Permissions',
-    Icon: Lock,
-    valueColor: 'text-[#63a8ff]',
-    iconColor: 'text-[#63a8ff]',
-    iconBg: 'bg-[#17315a]'
-  },
-  {
-    key: 'active',
-    label: 'Active Permissions',
-    Icon: CheckCircle,
-    valueColor: 'text-[#40e1b2]',
-    iconColor: 'text-[#40e1b2]',
-    iconBg: 'bg-[#133c43]'
-  },
-  {
-    key: 'inactive',
-    label: 'Inactive Permissions',
-    Icon: XCircle,
-    valueColor: 'text-[#b4bfce]',
-    iconColor: 'text-[#b4bfce]',
-    iconBg: 'bg-[#353b46]'
-  },
-]
+const formatPermissionLabel = (name = '') =>
+  name
+    .split('_')
+    .filter(Boolean)
+    .map((part) => (part.toLowerCase() === 'ad' ? 'AD' : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(' ')
 
 const Permissions = () => {
   const [showModal, setShowModal] = useState(false)
   const [editingPermission, setEditingPermission] = useState(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [filterCategory, setFilterCategory] = useState('All')
-  const [filterStatus, setFilterStatus] = useState('All')
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [permissionToDelete, setPermissionToDelete] = useState(null)
-  const [selectedPermissions, setSelectedPermissions] = useState([])
-  const [showBulkActions, setShowBulkActions] = useState(false)
   const [permissions, setPermissions] = useState([])
 
   const [formData, setFormData] = useState({
@@ -69,16 +37,10 @@ const Permissions = () => {
     }
   }
 
-  // Filter and search permissions
+  // Keep a stable list reference for existing selection logic
   const filteredPermissions = useMemo(() => {
-    return permissions.filter(permission => {
-      const matchesSearch = permission.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           permission.description.toLowerCase().includes(searchQuery.toLowerCase())
-      const matchesCategory = filterCategory === 'All' || permission.category === filterCategory
-      const matchesStatus = filterStatus === 'All' || permission.status === filterStatus
-      return matchesSearch && matchesCategory && matchesStatus
-    })
-  }, [permissions, searchQuery, filterCategory, filterStatus])
+    return permissions
+  }, [permissions])
 
   const handleSubmitPermission = async (e) => {
     e.preventDefault()
@@ -110,251 +72,12 @@ const Permissions = () => {
     setShowModal(true)
   }
 
-  const handleAddNew = () => {
-    setEditingPermission(null)
-    setFormData({ name: '', description: '', category: 'Content Management', status: 'Active', usedBy: [] })
-    setShowModal(true)
-  }
-
-  const handleDeletePermission = (id) => {
-    const permission = permissions.find(p => p.id === id)
-    if (permission) {
-      setPermissionToDelete(permission)
-      setShowDeleteConfirm(true)
-    }
-  }
-
-  const confirmDelete = async () => {
-    if (permissionToDelete) {
-      try {
-        await api.delete(`/permissions/${permissionToDelete.id}`)
-        setPermissions(permissions.filter(p => p.id !== permissionToDelete.id))
-        setShowDeleteConfirm(false)
-        setPermissionToDelete(null)
-      } catch (err) {
-        alert(err.response?.data?.error || 'Delete failed')
-      }
-    }
-  }
-
-  const toggleStatus = async (id) => {
-    const permission = permissions.find(p => p.id === id)
-    if (!permission) return
-    const newStatus = permission.status === 'Active' ? 'Inactive' : 'Active'
-    try {
-      const { data } = await api.put(`/permissions/${id}`, { ...permission, status: newStatus })
-      setPermissions(permissions.map(p => p.id === id ? data : p))
-    } catch (err) {
-      alert(err.response?.data?.error || 'Update failed')
-    }
-  }
-
-  // Handle bulk selection
-  const toggleSelectPermission = (id) => {
-    setSelectedPermissions(prev =>
-      prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]
-    )
-  }
-
-  const toggleSelectAll = () => {
-    if (selectedPermissions.length === filteredPermissions.length) {
-      setSelectedPermissions([])
-    } else {
-      setSelectedPermissions(filteredPermissions.map(p => p.id))
-    }
-  }
-
-  // Bulk actions
-  const handleBulkActivate = async () => {
-    try {
-      for (const id of selectedPermissions) {
-        const perm = permissions.find(p => p.id === id)
-        if (perm) await api.put(`/permissions/${id}`, { ...perm, status: 'Active' })
-      }
-      await fetchPermissions()
-      setSelectedPermissions([])
-      setShowBulkActions(false)
-    } catch (err) { alert('Bulk activate failed') }
-  }
-
-  const handleBulkDeactivate = async () => {
-    try {
-      for (const id of selectedPermissions) {
-        const perm = permissions.find(p => p.id === id)
-        if (perm) await api.put(`/permissions/${id}`, { ...perm, status: 'Inactive' })
-      }
-      await fetchPermissions()
-      setSelectedPermissions([])
-      setShowBulkActions(false)
-    } catch (err) { alert('Bulk deactivate failed') }
-  }
-
-  const handleBulkDelete = async () => {
-    try {
-      for (const id of selectedPermissions) {
-        await api.delete(`/permissions/${id}`)
-      }
-      setPermissions(permissions.filter(p => !selectedPermissions.includes(p.id)))
-      setSelectedPermissions([])
-      setShowBulkActions(false)
-    } catch (err) { alert('Bulk delete failed') }
-  }
-
-  // Get statistics
-  const stats = useMemo(() => {
-    return {
-      total: permissions.length,
-      active: permissions.filter(p => p.status === 'Active').length,
-      inactive: permissions.filter(p => p.status === 'Inactive').length
-    }
-  }, [permissions])
-
-  // Group permissions by category
-  const groupedPermissions = filteredPermissions.reduce((acc, permission) => {
-    if (!acc[permission.category]) {
-      acc[permission.category] = []
-    }
-    acc[permission.category].push(permission)
-    return acc
-  }, {})
-
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-blue-100">Permissions Management</h1>
-          <p className="text-gray-600 mt-1">Define and manage access permissions for your application</p>
+          <h1 className="text-3xl font-bold text-white">Permissions</h1>
         </div>
-        <button
-          onClick={handleAddNew}
-          className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors shadow-md hover:shadow-lg"
-        >
-          + Add Permission
-        </button>
-      </div>
-
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        {STAT_META.map((meta) => (
-          <div key={meta.key} className="rounded-2xl border shadow-md p-6 flex items-start justify-between" style={SURFACE_STYLE}>
-            <div>
-              <p className="text-blue-200 text-sm font-medium mb-2">{meta.label}</p>
-              <p className={`text-5xl leading-none font-bold ${meta.valueColor}`}>{stats[meta.key]}</p>
-            </div>
-            <div className={`${meta.iconBg} w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center`}>
-              <meta.Icon className={`w-7 h-7 ${meta.iconColor}`} />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Search and Filter Bar */}
-      <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-        {/* Select All Checkbox */}
-        <div className="mb-4 pb-4 border-b border-gray-200">
-          <label className="flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={selectedPermissions.length === filteredPermissions.length && filteredPermissions.length > 0}
-              onChange={toggleSelectAll}
-              className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-            />
-            <span className="ml-3 text-gray-700 font-medium">
-              Select all {filteredPermissions.length} permission{filteredPermissions.length > 1 ? 's' : ''}
-            </span>
-          </label>
-        </div>
-
-        <div className="flex flex-col md:flex-row md:items-center gap-4 mb-4">
-          <div className="flex-1">
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Search permissions by name or description..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <select
-              value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              <option value="All">All Categories</option>
-              {categories.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              <option value="All">All Status</option>
-              <option value="Active">Active</option>
-              <option value="Inactive">Inactive</option>
-            </select>
-          </div>
-        </div>
-        
-        {/* Filter Results Info */}
-        {(searchQuery || filterCategory !== 'All' || filterStatus !== 'All') && (
-          <div className="flex items-center justify-between text-sm mb-4 pb-4 border-b border-gray-200">
-            <span className="text-gray-600">
-              Showing {filteredPermissions.length} of {permissions.length} permissions
-            </span>
-            <button
-              onClick={() => {
-                setSearchQuery('')
-                setFilterCategory('All')
-                setFilterStatus('All')
-              }}
-              className="text-blue-600 hover:text-blue-800 font-medium"
-            >
-              Clear filters
-            </button>
-          </div>
-        )}
-
-        {/* Bulk Actions Bar */}
-        {selectedPermissions.length > 0 && (
-          <div className="rounded-lg p-4 flex items-center justify-between border" style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}>
-            <div className="flex items-center space-x-3">
-              <span className="text-blue-200 font-semibold">
-                {selectedPermissions.length} permission{selectedPermissions.length > 1 ? 's' : ''} selected
-              </span>
-              <button
-                onClick={() => setSelectedPermissions([])}
-                className="text-blue-400 hover:text-blue-300 text-sm underline"
-              >
-                Clear selection
-              </button>
-            </div>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={handleBulkActivate}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
-              >
-                Activate All
-              </button>
-              <button
-                onClick={handleBulkDeactivate}
-                className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm"
-              >
-                Deactivate All
-              </button>
-              <button
-                onClick={() => setShowBulkActions(true)}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
-              >
-                Delete All
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Permissions List */}
@@ -362,61 +85,18 @@ const Permissions = () => {
         <div className="bg-white rounded-lg shadow-md p-12 text-center">
           <div className="text-6xl mb-4">🔍</div>
           <h3 className="text-xl font-semibold text-gray-700 mb-2">No permissions found</h3>
-          <p className="text-gray-500 mb-6">
-            {searchQuery || filterCategory !== 'All' || filterStatus !== 'All'
-              ? 'Try adjusting your search or filters'
-              : 'Get started by creating your first permission'
-            }
-          </p>
-          {(!searchQuery && filterCategory === 'All' && filterStatus === 'All') && (
-            <button
-              onClick={handleAddNew}
-              className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Create Permission
-            </button>
-          )}
+          <p className="text-gray-500 mb-6">No permissions available.</p>
         </div>
       ) : (
-        <>
-          {/* Permissions by Category */}
-          <div className="space-y-6">{Object.entries(groupedPermissions).map(([category, perms]) => (
-          <div key={category} className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-gray-800">
-                  {category}
-                </h2>
-                <span className="bg-white px-3 py-1 rounded-full text-sm font-semibold text-gray-600">
-                  {perms.length} {perms.length === 1 ? 'permission' : 'permissions'}
-                </span>
-              </div>
-            </div>
-            <div className="divide-y divide-gray-200">
-              {perms.map((permission) => (
+        <div className="bg-white rounded-lg shadow-md overflow-hidden">
+          <div className="divide-y divide-gray-200">
+            {filteredPermissions.map((permission) => (
                 <div key={permission.id} className="p-6 hover:bg-gray-50 transition-colors">
-                  <div className="flex items-start space-x-4">
-                    {/* Checkbox */}
-                    <div className="pt-1">
-                      <input
-                        type="checkbox"
-                        checked={selectedPermissions.includes(permission.id)}
-                        onChange={() => toggleSelectPermission(permission.id)}
-                        className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-
+                  <div className="flex items-start">
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-3 mb-2">
-                        <h3 className="text-lg font-semibold text-gray-800">{permission.name}</h3>
-                        <span className={`px-3 py-1 text-xs font-semibold rounded-full ${
-                          permission.status === 'Active' 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-gray-100 text-gray-600'
-                        }`}>
-                          {permission.status}
-                        </span>
+                        <h3 className="text-lg font-semibold text-gray-800">{formatPermissionLabel(permission.name)}</h3>
                       </div>
                       <p className="text-gray-600 text-sm mb-3">{permission.description}</p>
                       
@@ -436,18 +116,7 @@ const Permissions = () => {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center gap-4">
-                      <button
-                        onClick={() => toggleStatus(permission.id)}
-                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                          permission.status === 'Active'
-                            ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
-                            : 'bg-green-100 text-green-700 hover:bg-green-200'
-                        }`}
-                        title={permission.status === 'Active' ? 'Click to deactivate' : 'Click to activate'}
-                      >
-                        {permission.status === 'Active' ? 'Deactivate' : 'Activate'}
-                      </button>
+                    <div className="flex items-center gap-4 mr-3">
                       <button 
                         onClick={() => handleEditPermission(permission)}
                         className="text-gray-500 hover:text-blue-600 transition-colors"
@@ -455,21 +124,12 @@ const Permissions = () => {
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
-                      <button
-                        onClick={() => handleDeletePermission(permission.id)}
-                        className="text-red-500 hover:text-red-700 transition-colors"
-                        title="Delete permission"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
+            ))}
           </div>
-        ))}</div>
-        </>
+        </div>
       )}
 
       {/* Add/Edit Permission Modal */}
@@ -477,7 +137,7 @@ const Permissions = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold mb-6 text-gray-800">
-              {editingPermission ? 'Edit Permission' : 'Add New Permission'}
+              Edit Permission
             </h2>
             
             <form onSubmit={handleSubmitPermission}>
@@ -489,7 +149,7 @@ const Permissions = () => {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent"
                   placeholder="e.g., Create Posts, Delete Users"
                   required
                 />
@@ -503,45 +163,12 @@ const Permissions = () => {
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent"
                   rows="3"
                   placeholder="Explain what this permission allows users to do..."
                   required
                 />
                 <p className="text-gray-500 text-xs mt-1">Provide a detailed explanation to help others understand this permission</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 mb-5">
-                <div>
-                  <label className="block text-gray-700 text-sm font-bold mb-2">
-                    Category *
-                  </label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  >
-                    {categories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                  <p className="text-gray-500 text-xs mt-1">Group similar permissions together</p>
-                </div>
-
-                <div>
-                  <label className="block text-gray-700 text-sm font-bold mb-2">
-                    Status *
-                  </label>
-                  <select
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
-                  <p className="text-gray-500 text-xs mt-1">Control permission availability</p>
-                </div>
               </div>
 
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
@@ -560,7 +187,7 @@ const Permissions = () => {
                   type="submit"
                   className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-md hover:shadow-lg"
                 >
-                  {editingPermission ? 'Update Permission' : 'Create Permission'}
+                  Update Permission
                 </button>
               </div>
             </form>
@@ -568,81 +195,6 @@ const Permissions = () => {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
-      {showDeleteConfirm && permissionToDelete && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-8 max-w-md w-full">
-            <div className="text-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">Delete Permission?</h2>
-              <p className="text-gray-600">
-                Are you sure you want to delete the permission <strong>"{permissionToDelete.name}"</strong>?
-              </p>
-            </div>
-
-            {permissionToDelete.usedBy && permissionToDelete.usedBy.length > 0 && (
-              <p className="text-sm text-gray-500 mb-6">
-                Used by: {permissionToDelete.usedBy.join(', ')}
-              </p>
-            )}
-
-            <div className="flex justify-end space-x-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowDeleteConfirm(false)
-                  setPermissionToDelete(null)
-                }}
-                className="px-6 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDelete}
-                className="px-6 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
-              >
-                Yes, Delete Permission
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bulk Delete Confirmation Modal */}
-      {showBulkActions && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-8 max-w-md w-full">
-            <div className="text-center mb-6">
-              <div className="text-6xl mb-4">🗑️</div>
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">Delete Multiple Permissions?</h2>
-              <p className="text-gray-600">
-                Are you sure you want to delete <strong>{selectedPermissions.length} permissions</strong>?
-              </p>
-            </div>
-
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-red-800">
-                <strong>This action cannot be undone.</strong> All selected permissions will be permanently deleted from the system.
-              </p>
-            </div>
-
-            <div className="flex justify-end space-x-3">
-              <button
-                type="button"
-                onClick={() => setShowBulkActions(false)}
-                className="px-6 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleBulkDelete}
-                className="px-6 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
-              >
-                Yes, Delete All
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
