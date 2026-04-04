@@ -4,6 +4,13 @@ import api from '../utils/api'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+const formatPermissionLabel = (name = '') =>
+  name
+    .split('_')
+    .filter(Boolean)
+    .map((part) => (part.toLowerCase() === 'ad' ? 'AD' : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(' ')
+
 const Roles = () => {
   const [showModal, setShowModal] = useState(false)
   const [editingRole, setEditingRole] = useState(null)
@@ -182,7 +189,7 @@ const Roles = () => {
                     key={index}
                     className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full"
                   >
-                    {permission}
+                    {formatPermissionLabel(permission)}
                   </span>
                 ))}
               </div>
@@ -241,7 +248,7 @@ const Roles = () => {
                         onChange={() => handlePermissionToggle(permission)}
                         className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-white"
                       />
-                      <span className="ml-2 text-gray-700">{permission}</span>
+                      <span className="ml-2 text-gray-700">{formatPermissionLabel(permission)}</span>
                     </label>
                   ))}
                 </div>

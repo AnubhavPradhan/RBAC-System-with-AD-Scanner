@@ -122,15 +122,6 @@ const Settings = () => {
           <h2 className="text-xl font-semibold text-gray-800 mb-6">General Settings</h2>
           <div className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Site Name</label>
-              <input
-                type="text"
-                value={generalSettings.siteName}
-                onChange={(e) => handleGeneralChange('siteName', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
-              />
-            </div>
-            <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Timezone</label>
               <select
                 value={generalSettings.timezone}

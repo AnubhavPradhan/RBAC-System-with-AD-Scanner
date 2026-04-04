@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Shield, AlertTriangle, Users, UserX, Key, RefreshCw, ChevronDown, ChevronUp, Search, Server, Wifi, WifiOff, Plug, Unplug, Eye, EyeOff, XCircle, CheckCircle, Info, AlertCircle, X, Plus, Pencil, Trash2, UserPlus, UserMinus, Monitor } from 'lucide-react'
+import { Shield, AlertTriangle, Users, UserX, RefreshCw, ChevronDown, ChevronUp, Search, Server, Wifi, WifiOff, Plug, Unplug, Eye, EyeOff, XCircle, CheckCircle, Info, AlertCircle, X, Plus, Pencil, Trash2, UserPlus, UserMinus, Monitor } from 'lucide-react'
 import api from '../utils/api'
 
 const RISK_COLORS = {
@@ -682,7 +682,7 @@ const ADScanner = () => {
               disabled={!scan}
               className="bg-purple-600 text-white px-5 py-2.5 rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 flex items-center gap-2"
             >
-              <Key className="w-4 h-4" /> Sync AD → RBAC
+              Sync AD → RBAC
             </button>
             <button
               onClick={handleRunScan}

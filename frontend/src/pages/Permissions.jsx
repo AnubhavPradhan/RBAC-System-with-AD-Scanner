@@ -2,6 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { Pencil } from 'lucide-react'
 import api from '../utils/api'
 
+const formatPermissionLabel = (name = '') =>
+  name
+    .split('_')
+    .filter(Boolean)
+    .map((part) => (part.toLowerCase() === 'ad' ? 'AD' : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(' ')
+
 const Permissions = () => {
   const [showModal, setShowModal] = useState(false)
   const [editingPermission, setEditingPermission] = useState(null)
@@ -89,7 +96,7 @@ const Permissions = () => {
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-3 mb-2">
-                        <h3 className="text-lg font-semibold text-gray-800">{permission.name}</h3>
+                        <h3 className="text-lg font-semibold text-gray-800">{formatPermissionLabel(permission.name)}</h3>
                       </div>
                       <p className="text-gray-600 text-sm mb-3">{permission.description}</p>
                       
