@@ -199,7 +199,6 @@ const Users = () => {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-3xl font-bold text-white">Users Management</h1>
-          <p className="text-gray-600 mt-1">Manage user accounts and access controls</p>
         </div>
         <div className="flex gap-3">
           <button
@@ -306,7 +305,7 @@ const Users = () => {
               <tr key={user.id} className="hover:bg-gray-50">
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center">
-                    <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold mr-3">
+                    <div className="w-10 h-10 bg-[#d8d8c8] rounded-full flex items-center justify-center text-[#222] font-semibold mr-3">
                       {user.name.split(' ').map(n => n[0]).join('')}
                     </div>
                     <div className="text-sm font-medium text-gray-900">{user.name}</div>
