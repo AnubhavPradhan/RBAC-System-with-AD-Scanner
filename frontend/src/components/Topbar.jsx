@@ -107,9 +107,14 @@ const Topbar = () => {
     navigate('/login')
   }
 
-  const handleClearNotifications = () => {
-    setItems([])
-    setUnreadCount(0)
+  const handleClearNotifications = async () => {
+    try {
+      await api.delete('/ad-scanner/notifications')
+      setItems([])
+      setUnreadCount(0)
+    } catch (err) {
+      console.error('Failed to clear AD notifications:', err)
+    }
   }
 
   return (

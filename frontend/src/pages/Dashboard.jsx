@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Users, ShieldCheck, Lock, Activity, Wifi, WifiOff } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend
@@ -45,6 +46,8 @@ const SURFACE_STYLE = {
 }
 
 const Dashboard = () => {
+  const { currentUser } = useAuth()
+  const isAdmin = currentUser?.role === 'Admin'
   const [stats, setStats] = useState(
     STAT_META.map(m => ({ ...m, value: '0' }))
   )
@@ -166,26 +169,28 @@ const Dashboard = () => {
     <div>
       <h1 className="text-3xl font-bold text-white mb-8">Dashboard</h1>
 
-      <div className="rounded-2xl border shadow-md p-4 mb-6 flex items-center justify-between" style={SURFACE_STYLE}>
-        <div>
-          <p className="text-sm text-white">Windows Server AD Connection</p>
-          <div className="flex flex-wrap items-center gap-2 mt-0.5">
-            <p className="text-base font-semibold text-blue-50">
-              {adStatus.loading ? 'Checking status...' : adStatus.connected ? 'Connected' : 'Offline'}
-            </p>
-            {!adStatus.loading && (
-              <p className="text-sm text-blue-300">{adStatus.message}</p>
+      {isAdmin && (
+        <div className="rounded-2xl border shadow-md p-4 mb-6 flex items-center justify-between" style={SURFACE_STYLE}>
+          <div>
+            <p className="text-sm text-white">Windows Server AD Connection</p>
+            <div className="flex flex-wrap items-center gap-2 mt-0.5">
+              <p className="text-base font-semibold text-blue-50">
+                {adStatus.loading ? 'Checking status...' : adStatus.connected ? 'Connected' : 'Offline'}
+              </p>
+              {!adStatus.loading && (
+                <p className="text-sm text-blue-300">{adStatus.message}</p>
+              )}
+            </div>
+          </div>
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${adStatus.connected ? 'bg-green-900/40' : 'bg-red-900/40'}`}>
+            {adStatus.connected ? (
+              <Wifi className="w-5 h-5 text-green-400" />
+            ) : (
+              <WifiOff className="w-5 h-5 text-red-400" />
             )}
           </div>
         </div>
-        <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${adStatus.connected ? 'bg-green-900/40' : 'bg-red-900/40'}`}>
-          {adStatus.connected ? (
-            <Wifi className="w-5 h-5 text-green-400" />
-          ) : (
-            <WifiOff className="w-5 h-5 text-red-400" />
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
