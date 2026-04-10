@@ -17,6 +17,25 @@ const RISK_BG = {
   Low: 'bg-green-500',
 }
 
+const createDefaultAdUserForm = (domain = '') => ({
+  first_name: '',
+  last_name: '',
+  initials: '',
+  full_name: '',
+  user_logon_name: '',
+  sam_account_name: '',
+  upn_suffix: domain,
+  password: '',
+  description: '',
+  enabled: true,
+  user_must_change_password_next_logon: false,
+  user_cannot_change_password: false,
+  password_never_expires: false,
+  logon_to_all_computers: true,
+  logon_workstations: [],
+  ou_dn: '',
+})
+
 const ADScanner = () => {
   // ── Connection state ──
   const [connection, setConnection] = useState(null)          // { connected, config }
@@ -111,7 +130,7 @@ const ADScanner = () => {
   // ── CRUD: User ──
   const [showUserModal, setShowUserModal] = useState(false)
   const [userModalMode, setUserModalMode] = useState('create')
-  const [userForm, setUserForm] = useState({ first_name: '', last_name: '', initials: '', full_name: '', sam_account_name: '', upn_suffix: '', password: '', description: '', enabled: true, password_never_expires: false, ou_dn: '' })
+  const [userForm, setUserForm] = useState(createDefaultAdUserForm())
   const [editingUserSam, setEditingUserSam] = useState(null)
   const [showGroupAssignModal, setShowGroupAssignModal] = useState(false)
   const [groupAssignUser, setGroupAssignUser] = useState(null)
@@ -122,21 +141,21 @@ const ADScanner = () => {
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false)
   const [createGroupForm, setCreateGroupForm] = useState({ name: '', scope: 'Global', group_type: 'Security', description: '', ou_dn: '' })
   const [showEditGroupModal, setShowEditGroupModal] = useState(false)
-  const [editGroupForm, setEditGroupForm] = useState({ description: '' })
+  const [editGroupForm, setEditGroupForm] = useState({ name: '', scope: 'Global', group_type: 'Security', description: '' })
   const [editGroupCn, setEditGroupCn] = useState('')
 
   // ── CRUD: OU ──
   const [showOuModal, setShowOuModal] = useState(false)
   const [ouForm, setOuForm] = useState({ name: '', description: '', parent_dn: '' })
   const [showEditOuModal, setShowEditOuModal] = useState(false)
-  const [editOuForm, setEditOuForm] = useState({ description: '' })
+  const [editOuForm, setEditOuForm] = useState({ name: '', description: '' })
   const [editOuDn, setEditOuDn] = useState('')
 
   // ── CRUD: Computer ──
   const [showComputerModal, setShowComputerModal] = useState(false)
   const [computerForm, setComputerForm] = useState({ name: '', ou_dn: '', description: '' })
   const [showEditComputerModal, setShowEditComputerModal] = useState(false)
-  const [editComputerForm, setEditComputerForm] = useState({ description: '', enabled: true })
+  const [editComputerForm, setEditComputerForm] = useState({ name: '', dns_hostname: '', os: '', os_version: '', description: '', enabled: true })
   const [editComputerCn, setEditComputerCn] = useState('')
 
   // ── Domain Controllers ──
@@ -345,12 +364,13 @@ const ADScanner = () => {
   // ── User CRUD ──
   const openCreateUser = () => {
     setUserModalMode('create')
-    setUserForm({ first_name: '', last_name: '', initials: '', full_name: '', sam_account_name: '', upn_suffix: connection?.config?.domain || '', password: '', description: '', enabled: true, password_never_expires: false, ou_dn: '' })
+    setUserForm(createDefaultAdUserForm(connection?.config?.domain || ''))
     setShowAdUserPassword(false)
     setShowUserModal(true)
+    if (computers.length === 0 && !computersLoading) fetchComputers()
   }
 
-  const openEditUser = (user) => {
+  const openEditUser = async (user) => {
     setUserModalMode('edit')
     setEditingUserSam(user.sam_account_name)
     setUserForm({
@@ -358,38 +378,83 @@ const ADScanner = () => {
       last_name: user.display_name?.split(' ').slice(1).join(' ') || '',
       initials: '',
       full_name: user.display_name || '',
-      sam_account_name: user.sam_account_name,
-      upn_suffix: '',
+      user_logon_name: user.user_logon_name || user.email?.split('@')[0] || user.sam_account_name || '',
+      sam_account_name: user.sam_account_name || '',
+      upn_suffix: user.upn_suffix || connection?.config?.domain || '',
       password: '',
       description: user.description || '',
       enabled: user.enabled,
+      user_must_change_password_next_logon: !!user.user_must_change_password_next_logon,
+      user_cannot_change_password: !!user.user_cannot_change_password,
       password_never_expires: user.password_never_expires || false,
+      logon_to_all_computers: user.logon_to_all_computers !== false,
+      logon_workstations: Array.isArray(user.logon_workstations) ? user.logon_workstations : [],
       ou_dn: '',
     })
     setShowAdUserPassword(false)
     setShowUserModal(true)
+    if (computers.length === 0 && !computersLoading) fetchComputers()
+
+    try {
+      const { data } = await api.get(`/ad-scanner/users/${user.sam_account_name}`)
+      setUserForm(prev => ({
+        ...prev,
+        first_name: data.first_name || prev.first_name,
+        last_name: data.last_name || prev.last_name,
+        initials: data.initials || prev.initials,
+        full_name: data.full_name || prev.full_name,
+        user_logon_name: data.user_logon_name || prev.user_logon_name,
+        sam_account_name: data.pre_windows_logon_name || data.sam_account_name || prev.sam_account_name,
+        upn_suffix: data.upn_suffix || prev.upn_suffix,
+        description: data.description ?? prev.description,
+        enabled: typeof data.enabled === 'boolean' ? data.enabled : prev.enabled,
+        user_must_change_password_next_logon: typeof data.user_must_change_password_next_logon === 'boolean' ? data.user_must_change_password_next_logon : prev.user_must_change_password_next_logon,
+        user_cannot_change_password: typeof data.user_cannot_change_password === 'boolean' ? data.user_cannot_change_password : prev.user_cannot_change_password,
+        password_never_expires: typeof data.password_never_expires === 'boolean' ? data.password_never_expires : prev.password_never_expires,
+        logon_to_all_computers: typeof data.logon_to_all_computers === 'boolean' ? data.logon_to_all_computers : prev.logon_to_all_computers,
+        logon_workstations: Array.isArray(data.logon_workstations) ? data.logon_workstations : prev.logon_workstations,
+      }))
+    } catch (err) {
+      console.error('Failed to load AD user details:', err)
+    }
   }
 
   const handleSaveUser = async (e) => {
     e.preventDefault()
     try {
       if (userModalMode === 'create') {
-        await api.post('/ad-scanner/users', userForm)
-        showNotification('success', `User '${userForm.sam_account_name}' created successfully`)
+        const payload = {
+          ...userForm,
+          sam_account_name: userForm.sam_account_name || userForm.user_logon_name,
+          pre_windows_logon_name: userForm.sam_account_name || userForm.user_logon_name,
+        }
+        await api.post('/ad-scanner/users', payload)
+        showNotification('success', `User '${payload.sam_account_name}' created successfully`)
       } else {
-        await api.put(`/ad-scanner/users/${editingUserSam}`, {
+        const payload = {
           first_name: userForm.first_name || undefined,
           last_name: userForm.last_name || undefined,
           initials: userForm.initials || undefined,
           display_name: userForm.full_name || undefined,
           email: userForm.email || undefined,
+          user_logon_name: userForm.user_logon_name || undefined,
+          pre_windows_logon_name: userForm.sam_account_name || undefined,
+          upn_suffix: userForm.upn_suffix || undefined,
           description: userForm.description,
           enabled: userForm.enabled,
+          user_must_change_password_next_logon: userForm.user_must_change_password_next_logon,
+          user_cannot_change_password: userForm.user_cannot_change_password,
           password_never_expires: userForm.password_never_expires,
+          logon_to_all_computers: userForm.logon_to_all_computers,
+          logon_workstations: userForm.logon_workstations,
+        }
+        await api.put(`/ad-scanner/users/${editingUserSam}`, {
+          ...payload,
         })
         showNotification('success', `User '${editingUserSam}' updated successfully`)
       }
       setShowUserModal(false)
+      setUserForm(createDefaultAdUserForm(connection?.config?.domain || ''))
       await handleRunScan()
     } catch (err) {
       showNotification('error', err.response?.data?.detail || 'Operation failed')
@@ -493,8 +558,8 @@ const ADScanner = () => {
   const handleUpdateGroup = async (e) => {
     e.preventDefault()
     try {
-      await api.put(`/ad-scanner/groups/${editGroupCn}`, { description: editGroupForm.description })
-      showNotification('success', `Group '${editGroupCn}' updated`)
+      await api.put(`/ad-scanner/groups/${editGroupCn}`, editGroupForm)
+      showNotification('success', `Group '${editGroupForm.name || editGroupCn}' updated`)
       setShowEditGroupModal(false)
       await fetchAdGroups()
     } catch (err) {
@@ -531,7 +596,7 @@ const ADScanner = () => {
   const handleUpdateOu = async (e) => {
     e.preventDefault()
     try {
-      await api.put(`/ad-scanner/ous/update?dn=${encodeURIComponent(editOuDn)}&description=${encodeURIComponent(editOuForm.description)}`)
+      await api.put(`/ad-scanner/ous/update?dn=${encodeURIComponent(editOuDn)}&description=${encodeURIComponent(editOuForm.description)}&name=${encodeURIComponent(editOuForm.name || '')}`)
       showNotification('success', 'OU updated')
       setShowEditOuModal(false)
       await fetchOus()
@@ -1327,7 +1392,17 @@ const ADScanner = () => {
                             </td>
                             <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
                               <div className="flex items-center gap-3">
-                                <button onClick={() => { setEditGroupCn(group.name); setEditGroupForm({ description: group.description || '' }); setShowEditGroupModal(true) }}
+                                <button onClick={() => {
+                                  const normalizedScope = group.scope === 'Domain Local' ? 'DomainLocal' : (group.scope || 'Global')
+                                  setEditGroupCn(group.name)
+                                  setEditGroupForm({
+                                    name: group.name || '',
+                                    scope: normalizedScope,
+                                    group_type: group.type || 'Security',
+                                    description: group.description || '',
+                                  })
+                                  setShowEditGroupModal(true)
+                                }}
                                   title="Edit group" className="text-gray-500 hover:text-blue-600 transition-colors">
                                   <Pencil className="w-4 h-4" />
                                 </button>
@@ -1443,7 +1518,11 @@ const ADScanner = () => {
                         <td className="py-3 px-4 text-sm text-gray-500">{ou.created ? ou.created.replace('T', ' ') : '—'}</td>
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-3">
-                            <button onClick={() => { setEditOuDn(ou.dn); setEditOuForm({ description: ou.description || '' }); setShowEditOuModal(true) }}
+                            <button onClick={() => {
+                              setEditOuDn(ou.dn)
+                              setEditOuForm({ name: ou.name || '', description: ou.description || '' })
+                              setShowEditOuModal(true)
+                            }}
                               title="Edit OU" className="text-gray-500 hover:text-blue-600 transition-colors">
                               <Pencil className="w-4 h-4" />
                             </button>
@@ -1559,7 +1638,18 @@ const ADScanner = () => {
                         <td className="py-3 px-4 text-sm text-gray-500">{c.description || <span className="italic text-gray-300">None</span>}</td>
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-3">
-                            <button onClick={() => { setEditComputerCn(c.name); setEditComputerForm({ description: c.description || '', enabled: c.enabled }); setShowEditComputerModal(true) }}
+                            <button onClick={() => {
+                              setEditComputerCn(c.name)
+                              setEditComputerForm({
+                                name: c.name || '',
+                                dns_hostname: c.dns_hostname || '',
+                                os: c.os || '',
+                                os_version: c.os_version || '',
+                                description: c.description || '',
+                                enabled: c.enabled,
+                              })
+                              setShowEditComputerModal(true)
+                            }}
                               title="Edit computer" className="text-gray-500 hover:text-blue-600 transition-colors">
                               <Pencil className="w-4 h-4" />
                             </button>
@@ -1872,12 +1962,12 @@ const ADScanner = () => {
       {/* ═══ Create / Edit User Modal ═══ */}
       {showUserModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 overflow-hidden max-h-[90vh] flex flex-col">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
               <h2 className="text-lg font-bold">{userModalMode === 'create' ? 'New User' : 'Edit User'}</h2>
               <button onClick={() => setShowUserModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
-            <form onSubmit={handleSaveUser} className="p-5 space-y-3">
+            <form onSubmit={handleSaveUser} className="p-5 space-y-3 overflow-y-auto flex-1">
               {userModalMode === 'create' && (
                 <>
                   <div className="grid grid-cols-5 gap-3">
@@ -1906,7 +1996,7 @@ const ADScanner = () => {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name *</label>
-                      <input type="text" required value={userForm.sam_account_name} onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
+                      <input type="text" required value={userForm.user_logon_name} onChange={e => setUserForm({...userForm, user_logon_name: e.target.value})}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                     </div>
                     <div>
@@ -1915,6 +2005,11 @@ const ADScanner = () => {
                         placeholder={connection?.config?.domain || 'mylab.local'}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                     </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name (pre-Windows 2000) *</label>
+                    <input type="text" required value={userForm.sam_account_name} onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Password *</label>
@@ -1958,6 +2053,24 @@ const ADScanner = () => {
                     <input type="text" value={userForm.full_name} onChange={e => setUserForm({...userForm, full_name: e.target.value})}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                   </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name</label>
+                      <input type="text" value={userForm.user_logon_name} onChange={e => setUserForm({...userForm, user_logon_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name (pre-Windows 2000)</label>
+                      <input type="text" value={userForm.sam_account_name} onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">@domain</label>
+                    <input type="text" value={userForm.upn_suffix} onChange={e => setUserForm({...userForm, upn_suffix: e.target.value})}
+                      placeholder={connection?.config?.domain || 'mylab.local'}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                  </div>
                 </>
               )}
               <div>
@@ -1965,14 +2078,105 @@ const ADScanner = () => {
                 <input type="text" value={userForm.description} onChange={e => setUserForm({...userForm, description: e.target.value})}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
               </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+                <div className="text-sm font-semibold text-gray-700">Account options</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={userForm.user_must_change_password_next_logon}
+                      onChange={e => setUserForm({...userForm, user_must_change_password_next_logon: e.target.checked})}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-white"
+                    />
+                    <span className="text-sm font-medium text-gray-700">User must change password at next logon</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={userForm.user_cannot_change_password}
+                      onChange={e => setUserForm({...userForm, user_cannot_change_password: e.target.checked})}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-white"
+                    />
+                    <span className="text-sm font-medium text-gray-700">User cannot change password</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer md:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={userForm.password_never_expires}
+                      onChange={e => setUserForm({...userForm, password_never_expires: e.target.checked})}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-white"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Password never expires</span>
+                  </label>
+                </div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="text-sm font-semibold text-gray-700">Log on to</div>
+                  <div className="flex items-center gap-4 text-sm flex-wrap">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={userForm.logon_to_all_computers}
+                        onChange={() => setUserForm({...userForm, logon_to_all_computers: true})}
+                        className="text-blue-600 focus:ring-white"
+                      />
+                      <span className="text-gray-700">All computers</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={!userForm.logon_to_all_computers}
+                        onChange={() => setUserForm({...userForm, logon_to_all_computers: false})}
+                        className="text-blue-600 focus:ring-white"
+                      />
+                      <span className="text-gray-700">The following computers</span>
+                    </label>
+                  </div>
+                </div>
+                {!userForm.logon_to_all_computers && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-gray-500">Select one or more computers. These are stored in AD as workstation restrictions.</p>
+                    {computersLoading ? (
+                      <p className="text-sm text-gray-500">Loading computers...</p>
+                    ) : computers.length === 0 ? (
+                      <p className="text-sm text-gray-500">No computers available. Open the Computers tab and refresh first.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+                        {computers.map((computer) => {
+                          const computerName = computer.name.toUpperCase()
+                          const checked = userForm.logon_workstations.includes(computerName)
+                          return (
+                            <label key={computerName} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  setUserForm(prev => {
+                                    const selected = prev.logon_workstations.includes(computerName)
+                                      ? prev.logon_workstations.filter(item => item !== computerName)
+                                      : [...prev.logon_workstations, computerName]
+                                    return { ...prev, logon_workstations: selected }
+                                  })
+                                }}
+                                className="w-4 h-4 rounded text-blue-600 focus:ring-white"
+                              />
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium text-gray-700 truncate">{computer.name}</div>
+                                {computer.dns_hostname && <div className="text-xs text-gray-400 truncate">{computer.dns_hostname}</div>}
+                              </div>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-6">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={userForm.enabled} onChange={e => setUserForm({...userForm, enabled: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-white" />
                   <span className="text-sm font-medium text-gray-700">Account Enabled</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={userForm.password_never_expires} onChange={e => setUserForm({...userForm, password_never_expires: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-white" />
-                  <span className="text-sm font-medium text-gray-700">Password never expires</span>
                 </label>
               </div>
               <div className="flex justify-end gap-3 pt-2">
@@ -2089,6 +2293,39 @@ const ADScanner = () => {
             </div>
             <form onSubmit={handleUpdateGroup} className="p-6 space-y-4">
               <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Group name *</label>
+                <input type="text" required value={editGroupForm.name} onChange={e => setEditGroupForm({...editGroupForm, name: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Group scope</label>
+                  <div className="space-y-1">
+                    {['DomainLocal', 'Global', 'Universal'].map(s => (
+                      <label key={s} className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="edit_scope" value={s} checked={editGroupForm.scope === s}
+                          onChange={e => setEditGroupForm({...editGroupForm, scope: e.target.value})}
+                          className="text-blue-600 focus:ring-white" />
+                        <span className="text-sm text-gray-700">{s === 'DomainLocal' ? 'Domain local' : s}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Group type</label>
+                  <div className="space-y-1">
+                    {['Security', 'Distribution'].map(t => (
+                      <label key={t} className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="edit_gtype" value={t} checked={editGroupForm.group_type === t}
+                          onChange={e => setEditGroupForm({...editGroupForm, group_type: e.target.value})}
+                          className="text-blue-600 focus:ring-white" />
+                        <span className="text-sm text-gray-700">{t}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <input type="text" value={editGroupForm.description} onChange={e => setEditGroupForm({...editGroupForm, description: e.target.value})}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
@@ -2152,6 +2389,11 @@ const ADScanner = () => {
             </div>
             <form onSubmit={handleUpdateOu} className="p-6 space-y-4">
               <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">OU Name *</label>
+                <input type="text" required value={editOuForm.name} onChange={e => setEditOuForm({...editOuForm, name: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+              </div>
+              <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <input type="text" value={editOuForm.description} onChange={e => setEditOuForm({...editOuForm, description: e.target.value})}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
@@ -2214,6 +2456,28 @@ const ADScanner = () => {
               <button onClick={() => setShowEditComputerModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleUpdateComputer} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Computer name *</label>
+                <input type="text" required value={editComputerForm.name} onChange={e => setEditComputerForm({...editComputerForm, name: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">DNS name</label>
+                <input type="text" value={editComputerForm.dns_hostname} onChange={e => setEditComputerForm({...editComputerForm, dns_hostname: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">OS name</label>
+                  <input type="text" value={editComputerForm.os} onChange={e => setEditComputerForm({...editComputerForm, os: e.target.value})}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">OS version</label>
+                  <input type="text" value={editComputerForm.os_version} onChange={e => setEditComputerForm({...editComputerForm, os_version: e.target.value})}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                </div>
+              </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <input type="text" value={editComputerForm.description} onChange={e => setEditComputerForm({...editComputerForm, description: e.target.value})}
