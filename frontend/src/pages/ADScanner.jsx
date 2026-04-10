@@ -634,7 +634,11 @@ const ADScanner = () => {
   const handleUpdateComputer = async (e) => {
     e.preventDefault()
     try {
-      await api.put(`/ad-scanner/computers/${editComputerCn}`, editComputerForm)
+      const payload = {
+        description: editComputerForm.description,
+        enabled: editComputerForm.enabled,
+      }
+      await api.put(`/ad-scanner/computers/${editComputerCn}`, payload)
       showNotification('success', `Computer '${editComputerCn}' updated`)
       setShowEditComputerModal(false)
       await fetchComputers()
@@ -2456,28 +2460,6 @@ const ADScanner = () => {
               <button onClick={() => setShowEditComputerModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleUpdateComputer} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Computer name *</label>
-                <input type="text" required value={editComputerForm.name} onChange={e => setEditComputerForm({...editComputerForm, name: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">DNS name</label>
-                <input type="text" value={editComputerForm.dns_hostname} onChange={e => setEditComputerForm({...editComputerForm, dns_hostname: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">OS name</label>
-                  <input type="text" value={editComputerForm.os} onChange={e => setEditComputerForm({...editComputerForm, os: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">OS version</label>
-                  <input type="text" value={editComputerForm.os_version} onChange={e => setEditComputerForm({...editComputerForm, os_version: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
-                </div>
-              </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <input type="text" value={editComputerForm.description} onChange={e => setEditComputerForm({...editComputerForm, description: e.target.value})}

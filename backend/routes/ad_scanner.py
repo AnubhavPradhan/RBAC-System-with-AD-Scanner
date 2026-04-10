@@ -2507,26 +2507,26 @@ def update_computer(comp_cn: str, body: ComputerUpdateRequest,
         raise HTTPException(403, "Admin access required")
     conn, cfg = _get_ldap_conn(db)
     try:
-        from ldap3 import SUBTREE, MODIFY_REPLACE
+        from ldap3 import SUBTREE, MODIFY_REPLACE, MODIFY_DELETE
         conn.search(cfg.base_dn, f"(&(objectClass=computer)(cn={comp_cn}))",
                      search_scope=SUBTREE, attributes=["distinguishedName", "userAccountControl"])
         if not conn.entries:
             raise HTTPException(404, "Computer not found")
         comp_dn = str(conn.entries[0].distinguishedName)
-        target_name = (body.name or "").strip() or comp_cn
+        requested_name = (body.name or "").strip() if body.name is not None else None
+        target_name = requested_name or comp_cn
 
-        if target_name != comp_cn:
+        if requested_name and target_name != comp_cn:
             rename_ok = conn.modify_dn(comp_dn, f"CN={target_name}")
             if not rename_ok:
                 raise HTTPException(400, f"Rename failed: {conn.result.get('description', conn.result)}")
             comp_dn = _new_dn_with_rdn(comp_dn, "CN", target_name)
 
         changes = {}
-        if body.name is not None:
+        if requested_name and target_name != comp_cn:
             sam = target_name.upper()
             if not sam.endswith("$"):
                 sam += "$"
-            changes["cn"] = [(MODIFY_REPLACE, [target_name])]
             changes["sAMAccountName"] = [(MODIFY_REPLACE, [sam])]
         if body.dns_hostname is not None:
             changes["dNSHostName"] = [(MODIFY_REPLACE, [body.dns_hostname])]
@@ -2535,7 +2535,11 @@ def update_computer(comp_cn: str, body: ComputerUpdateRequest,
         if body.os_version is not None:
             changes["operatingSystemVersion"] = [(MODIFY_REPLACE, [body.os_version])]
         if body.description is not None:
-            changes["description"] = [(MODIFY_REPLACE, [body.description])]
+            cleaned_description = body.description.strip()
+            if cleaned_description:
+                changes["description"] = [(MODIFY_REPLACE, [cleaned_description])]
+            else:
+                changes["description"] = [(MODIFY_DELETE, [])]
         if body.enabled is not None:
             uac = int(str(conn.entries[0].userAccountControl)) if conn.entries[0].userAccountControl else 4096
             if body.enabled:
