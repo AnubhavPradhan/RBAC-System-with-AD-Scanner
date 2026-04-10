@@ -74,6 +74,10 @@ class _NotificationBroker:
         with self._lock:
             return list(self._history)[:max(1, min(limit, 100))]
 
+    def clear(self) -> None:
+        with self._lock:
+            self._history.clear()
+
 
 notification_broker = _NotificationBroker()
 
@@ -354,6 +358,20 @@ def recent_notifications(
         items = notification_broker.recent(limit)
 
     return {"items": items}
+
+
+@router.delete("/notifications")
+def clear_notifications(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+
+    db.query(ADNotification).delete()
+    db.commit()
+    notification_broker.clear()
+    return {"message": "All AD notifications cleared"}
 
 
 @router.get("/notifications/stream")
