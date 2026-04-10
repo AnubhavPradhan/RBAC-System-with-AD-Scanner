@@ -143,6 +143,13 @@ const ADScanner = () => {
   const [dcs, setDcs] = useState([])
   const [dcsLoading, setDcsLoading] = useState(false)
 
+  // ── Password Reset ──
+  const [showPasswordResetModal, setShowPasswordResetModal] = useState(false)
+  const [passwordResetUser, setPasswordResetUser] = useState(null)
+  const [resetPasswordForm, setResetPasswordForm] = useState({ new_password: '', confirm_password: '' })
+  const [showResetPassword, setShowResetPassword] = useState(false)
+  const [resetPasswordError, setResetPasswordError] = useState('')
+
   const formatScanTimestamp = (value) => {
     if (!value) return '-'
     return String(value).replace(/\.\d+$/, '')
@@ -398,6 +405,53 @@ const ADScanner = () => {
       await handleRunScan()
     } catch (err) {
       showNotification('error', err.response?.data?.detail || 'Delete failed')
+    }
+  }
+
+  const openPasswordReset = (user) => {
+    setPasswordResetUser(user)
+    setResetPasswordForm({ new_password: '', confirm_password: '' })
+    setShowResetPassword(false)
+    setResetPasswordError('')
+    setShowPasswordResetModal(true)
+  }
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault()
+    setResetPasswordError('')
+
+    if (!resetPasswordForm.new_password || !resetPasswordForm.confirm_password) {
+      setResetPasswordError('Both password fields are required')
+      return
+    }
+
+    if (resetPasswordForm.new_password !== resetPasswordForm.confirm_password) {
+      setResetPasswordError('Passwords do not match')
+      return
+    }
+
+    if (resetPasswordForm.new_password.length < 8) {
+      setResetPasswordError('Password must be at least 8 characters long')
+      return
+    }
+
+    if (!/[A-Z]/.test(resetPasswordForm.new_password) || !/[a-z]/.test(resetPasswordForm.new_password) || 
+        !/[0-9]/.test(resetPasswordForm.new_password) || !/[^A-Za-z0-9]/.test(resetPasswordForm.new_password)) {
+      setResetPasswordError('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character')
+      return
+    }
+
+    try {
+      await api.post(`/ad-scanner/users/${passwordResetUser.sam_account_name}/reset-password`, {
+        sam_account_name: passwordResetUser.sam_account_name,
+        new_password: resetPasswordForm.new_password
+      })
+      showNotification('success', `Password reset successfully for user '${passwordResetUser.sam_account_name}'`)
+      setShowPasswordResetModal(false)
+      setPasswordResetUser(null)
+      setResetPasswordForm({ new_password: '', confirm_password: '' })
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Password reset failed')
     }
   }
 
@@ -1069,6 +1123,10 @@ const ADScanner = () => {
                       </td>
                       <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-3">
+                          <button onClick={() => openPasswordReset(user)} title="Reset password"
+                            className="text-gray-500 hover:text-orange-600 transition-colors">
+                            <AlertCircle className="w-4 h-4" />
+                          </button>
                           <button onClick={() => openEditUser(user)} title="Edit user"
                             className="text-gray-500 hover:text-blue-600 transition-colors">
                             <Pencil className="w-4 h-4" />
@@ -2208,6 +2266,77 @@ const ADScanner = () => {
                 <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                   {editingMapping ? 'Update' : 'Create'}
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Password Reset Modal ═══ */}
+      {showPasswordResetModal && passwordResetUser && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-orange-600 to-amber-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">Reset AD User Password</h2>
+              <button onClick={() => setShowPasswordResetModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleResetPassword} className="p-6 space-y-4">
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-800">
+                <strong>User:</strong> {passwordResetUser.display_name} ({passwordResetUser.sam_account_name})
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">New Password *</label>
+                <div className="relative">
+                  <input 
+                    type={showResetPassword ? 'text' : 'password'}
+                    value={resetPasswordForm.new_password} 
+                    onChange={e => {
+                      setResetPasswordForm({...resetPasswordForm, new_password: e.target.value})
+                      if (resetPasswordError) setResetPasswordError('')
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-10 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                    placeholder="Enter new password"
+                    required 
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPassword(v => !v)}
+                    className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700"
+                    aria-label={showResetPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Must be 8+ characters with uppercase, lowercase, number, and special character
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Confirm Password *</label>
+                <input 
+                  type="password"
+                  value={resetPasswordForm.confirm_password} 
+                  onChange={e => {
+                    setResetPasswordForm({...resetPasswordForm, confirm_password: e.target.value})
+                    if (resetPasswordError) setResetPasswordError('')
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                  placeholder="Re-enter password"
+                  required 
+                />
+              </div>
+              {resetPasswordError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
+                  {resetPasswordError}
+                </div>
+              )}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800">
+                <strong>Note:</strong> Password reset requires a secure (SSL/TLS) AD connection. The user may need to log in with the new password at their next opportunity.
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowPasswordResetModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium">Reset Password</button>
               </div>
             </form>
           </div>

@@ -1813,6 +1813,94 @@ def remove_user_from_group(sam_account_name: str, body: ADUserGroupRequest,
 
 
 # ──────────────────────────────────────────
+# Password Reset Endpoint
+# ──────────────────────────────────────────
+class ADUserPasswordResetRequest(BaseModel):
+    sam_account_name: str
+    new_password: str
+
+
+@router.post("/users/{sam_account_name}/reset-password")
+def reset_ad_user_password(sam_account_name: str, body: ADUserPasswordResetRequest,
+                           current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Reset an AD user's password. Requires Admin role and SSL/TLS connection."""
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    
+    # Validate password strength
+    if not body.new_password or len(body.new_password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters long")
+    
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE, MODIFY_REPLACE
+        
+        # Verify connection is secure (SSL or StartTLS)
+        if not (cfg.use_ssl or cfg.use_start_tls):
+            raise HTTPException(400, "Password reset requires SSL or StartTLS connection for security")
+        
+        # Find the user
+        conn.search(cfg.base_dn, f"(&(objectClass=user)(sAMAccountName={sam_account_name}))",
+                     search_scope=SUBTREE, attributes=["distinguishedName"])
+        if not conn.entries:
+            raise HTTPException(404, f"User '{sam_account_name}' not found in AD")
+        
+        user_dn = str(conn.entries[0].distinguishedName)
+        
+        # Reset password by setting unicodePwd attribute
+        # In AD, passwords must be UTF-16LE encoded and wrapped in quotes
+        password_bytes = f'"{body.new_password}"'.encode('utf-16-le')
+        
+        changes = {
+            "unicodePwd": [(MODIFY_REPLACE, [password_bytes])]
+        }
+        
+        ok = conn.modify(user_dn, changes)
+        if not ok:
+            error_desc = conn.result.get('description', 'Unknown error')
+            # Common AD errors for password resets
+            if 'constraint violation' in error_desc.lower():
+                raise HTTPException(400, "Password does not meet AD complexity requirements")
+            elif 'access denied' in error_desc.lower():
+                raise HTTPException(403, "Access denied. Ensure bind account has permissions to reset passwords")
+            else:
+                raise HTTPException(400, f"Password reset failed: {error_desc}")
+        
+        conn.unbind()
+        
+        # Log the action
+        db.add(AuditLog(user_email=current_user.email, action="Reset Password", resource="AD User",
+                        details=f"Reset password for AD user '{sam_account_name}'", severity="Info"))
+        db.commit()
+        
+        # Publish notification
+        _publish_ad_notification(
+            db=db,
+            object_type="user",
+            action="password_reset",
+            name=sam_account_name,
+            changed_by=current_user.email,
+            source="app",
+            details="Password reset from AD Scanner UI",
+            distinguished_name=user_dn,
+        )
+        
+        return {"success": True, "message": f"Password reset successfully for user '{sam_account_name}'"}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Password reset failed: {str(e)}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+# ──────────────────────────────────────────
 # 13. AD Group CRUD
 # ──────────────────────────────────────────
 class ADGroupCreateRequest(BaseModel):
