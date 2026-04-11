@@ -46,8 +46,8 @@ const SURFACE_STYLE = {
 }
 
 const Dashboard = () => {
-  const { currentUser } = useAuth()
-  const isAdmin = currentUser?.role === 'Admin'
+  const { currentUser, hasPermission } = useAuth()
+  const canManageAdScanner = hasPermission('manage_ad_scanner')
   const [stats, setStats] = useState(
     STAT_META.map(m => ({ ...m, value: '0' }))
   )
@@ -148,8 +148,12 @@ const Dashboard = () => {
     fetchStats()
     fetchActivity()
     fetchRoleDistribution()
-    fetchAdStatus()
-  }, [])
+    if (canManageAdScanner) {
+      fetchAdStatus()
+    } else {
+      setAdStatus({ loading: false, configured: false, connected: false, message: '' })
+    }
+  }, [canManageAdScanner])
 
   const renderPieLabel = ({ cx, cy, midAngle, outerRadius, index }) => {
     const RADIAN = Math.PI / 180
@@ -169,7 +173,7 @@ const Dashboard = () => {
     <div>
       <h1 className="text-3xl font-bold text-white mb-8">Dashboard</h1>
 
-      {isAdmin && (
+      {canManageAdScanner && (
         <div className="rounded-2xl border shadow-md p-4 mb-6 flex items-center justify-between" style={SURFACE_STYLE}>
           <div>
             <p className="text-sm text-white">Windows Server AD Connection</p>

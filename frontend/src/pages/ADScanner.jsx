@@ -169,6 +169,94 @@ const ADScanner = () => {
   const [showResetPassword, setShowResetPassword] = useState(false)
   const [resetPasswordError, setResetPasswordError] = useState('')
 
+  useEffect(() => {
+    const hasOpenBox = Boolean(
+      notification ||
+      confirmDialog ||
+      showUserModal ||
+      showGroupAssignModal ||
+      showCreateGroupModal ||
+      showEditGroupModal ||
+      showOuModal ||
+      showEditOuModal ||
+      showComputerModal ||
+      showEditComputerModal ||
+      showMappingModal ||
+      showPasswordResetModal
+    )
+    if (!hasOpenBox) return
+
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+
+      if (confirmDialog) {
+        confirmDialog.onConfirm(false)
+        setConfirmDialog(null)
+        return
+      }
+      if (showPasswordResetModal) {
+        setShowPasswordResetModal(false)
+        return
+      }
+      if (showMappingModal) {
+        setShowMappingModal(false)
+        return
+      }
+      if (showEditComputerModal) {
+        setShowEditComputerModal(false)
+        return
+      }
+      if (showComputerModal) {
+        setShowComputerModal(false)
+        return
+      }
+      if (showEditOuModal) {
+        setShowEditOuModal(false)
+        return
+      }
+      if (showOuModal) {
+        setShowOuModal(false)
+        return
+      }
+      if (showEditGroupModal) {
+        setShowEditGroupModal(false)
+        return
+      }
+      if (showCreateGroupModal) {
+        setShowCreateGroupModal(false)
+        return
+      }
+      if (showGroupAssignModal) {
+        setShowGroupAssignModal(false)
+        return
+      }
+      if (showUserModal) {
+        setShowUserModal(false)
+        return
+      }
+      if (notification) {
+        setNotification(null)
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [
+    notification,
+    confirmDialog,
+    showUserModal,
+    showGroupAssignModal,
+    showCreateGroupModal,
+    showEditGroupModal,
+    showOuModal,
+    showEditOuModal,
+    showComputerModal,
+    showEditComputerModal,
+    showMappingModal,
+    showPasswordResetModal,
+  ])
+
   const formatScanTimestamp = (value) => {
     if (!value) return '-'
     return String(value).replace(/\.\d+$/, '')

@@ -120,10 +120,15 @@ const Topbar = () => {
   return (
     <header className="sticky top-0 z-30 border-b border-[#2a2a2a]" style={{ backgroundColor: 'var(--app-sidebar-color)' }}>
       <div className="w-full px-6 py-3 flex items-center justify-between">
-        <div className="text-2xl font-bold text-white flex items-center gap-2.5">
+        <button
+          type="button"
+          onClick={() => navigate('/dashboard')}
+          className="text-2xl font-bold text-white flex items-center gap-2.5 hover:text-white/90 transition-colors"
+          title="Go to Dashboard"
+        >
           <Shield className="w-7 h-7 text-white" />
           <span>RBAC & AD Scanner</span>
-        </div>
+        </button>
 
         <div className="flex items-center gap-3" ref={panelRef}>
           {isAdmin && (

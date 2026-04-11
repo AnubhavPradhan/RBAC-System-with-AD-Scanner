@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react'
-import { Pencil, Trash2 } from 'lucide-react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { Pencil, Trash2, GripVertical } from 'lucide-react'
 import api from '../utils/api'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const ROLE_ORDER_STORAGE_KEY = 'roles-card-order'
 
 const formatPermissionLabel = (name = '') =>
   name
@@ -19,6 +20,9 @@ const Roles = () => {
   const [loading, setLoading] = useState(true)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [roleToDelete, setRoleToDelete] = useState(null)
+  const [roleOrder, setRoleOrder] = useState([])
+  const [draggedRoleId, setDraggedRoleId] = useState(null)
+  const [orderHydrated, setOrderHydrated] = useState(false)
 
   const [formData, setFormData] = useState({
     name: '',
@@ -35,16 +39,57 @@ const Roles = () => {
     fetchPermissions()
   }, [])
 
+  useEffect(() => {
+    if (!showModal && !showDeleteConfirm) return
+
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      if (showDeleteConfirm) {
+        setShowDeleteConfirm(false)
+        setRoleToDelete(null)
+        return
+      }
+      if (showModal) {
+        setShowModal(false)
+        setEditingRole(null)
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [showModal, showDeleteConfirm])
+
   const fetchRoles = async () => {
     try {
       const { data } = await api.get('/roles')
       setRoles(data)
+
+      const fetchedIds = data.map(r => String(r.id))
+      const savedOrder = (() => {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(ROLE_ORDER_STORAGE_KEY) || '[]')
+          return Array.isArray(parsed) ? parsed.map(id => String(id)) : []
+        } catch {
+          return []
+        }
+      })()
+
+      const filteredSaved = savedOrder.filter(id => fetchedIds.includes(id))
+      const missingIds = fetchedIds.filter(id => !filteredSaved.includes(id))
+      setRoleOrder([...filteredSaved, ...missingIds])
+      setOrderHydrated(true)
     } catch (err) {
       console.error('Failed to fetch roles:', err)
     } finally {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!orderHydrated) return
+    localStorage.setItem(ROLE_ORDER_STORAGE_KEY, JSON.stringify(roleOrder))
+  }, [roleOrder, orderHydrated])
 
   const fetchPermissions = async () => {
     try {
@@ -72,6 +117,7 @@ const Roles = () => {
       } else {
         const { data } = await api.post('/roles', formData)
         setRoles([...roles, data])
+        setRoleOrder(prev => [...prev, String(data.id)])
       }
       setFormData({
         name: '',
@@ -135,11 +181,46 @@ const Roles = () => {
     try {
       await api.delete(`/roles/${roleToDelete.id}`)
       setRoles(roles.filter(r => r.id !== roleToDelete.id))
+      setRoleOrder(prev => prev.filter(id => id !== String(roleToDelete.id)))
       setShowDeleteConfirm(false)
       setRoleToDelete(null)
     } catch (err) {
       alert(err.response?.data?.error || 'Delete failed')
     }
+  }
+
+  const orderedRoles = useMemo(() => {
+    if (roleOrder.length === 0) return roles
+    const roleMap = new Map(roles.map(role => [String(role.id), role]))
+    const ordered = roleOrder.map(id => roleMap.get(id)).filter(Boolean)
+    const leftovers = roles.filter(role => !roleOrder.includes(String(role.id)))
+    return [...ordered, ...leftovers]
+  }, [roles, roleOrder])
+
+  const handleRoleDragStart = (event, roleId) => {
+    const normalizedId = String(roleId)
+    setDraggedRoleId(normalizedId)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', normalizedId)
+  }
+
+  const handleRoleDrop = (targetRoleId) => {
+    const normalizedTargetId = String(targetRoleId)
+    if (!draggedRoleId || draggedRoleId === normalizedTargetId) {
+      setDraggedRoleId(null)
+      return
+    }
+
+    setRoleOrder(prev => {
+      const next = prev.length ? [...prev] : roles.map(r => String(r.id))
+      const fromIdx = next.indexOf(draggedRoleId)
+      const toIdx = next.indexOf(normalizedTargetId)
+      if (fromIdx === -1 || toIdx === -1) return next
+      next.splice(fromIdx, 1)
+      next.splice(toIdx, 0, draggedRoleId)
+      return next
+    })
+    setDraggedRoleId(null)
   }
 
   return (
@@ -156,14 +237,29 @@ const Roles = () => {
 
       {/* Roles Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {roles.map((role) => (
-          <div key={role.id} className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow">
+        {orderedRoles.map((role) => (
+          <div
+            key={role.id}
+            draggable
+            onDragStart={(e) => handleRoleDragStart(e, role.id)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => handleRoleDrop(role.id)}
+            onDragEnd={() => setDraggedRoleId(null)}
+            className={`bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow ${draggedRoleId === role.id ? 'opacity-70' : ''}`}
+          >
             <div className="flex justify-between items-start mb-4">
               <div>
                 <h3 className="text-xl font-bold text-gray-800 mb-1">{role.name}</h3>
                 <p className="text-gray-500 text-sm">{role.description}</p>
               </div>
               <div className="flex space-x-2">
+                <button
+                  type="button"
+                  className="text-gray-400 hover:text-gray-600 transition-colors cursor-grab active:cursor-grabbing"
+                  title="Alignment handle: drag card to reorder"
+                >
+                  <GripVertical className="w-4 h-4" />
+                </button>
                 <button 
                   onClick={() => handleEditRole(role)}
                   className="text-gray-500 hover:text-blue-600 transition-colors"

@@ -64,7 +64,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         db.add(AuditLog(user_email=body.email, action="Failed Login", resource="Auth",
                         details=f"Failed login attempt for: {body.email}", severity="Warning"))
         db.commit()
-        raise HTTPException(401, "Invalid email or password")
+        raise HTTPException(401, "Invalid username or password")
 
     if user.status == "Inactive":
         raise HTTPException(403, "Account is inactive. Contact administrator.")

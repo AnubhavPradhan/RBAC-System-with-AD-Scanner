@@ -55,6 +55,28 @@ const Users = () => {
     fetchRoles()
   }, [])
 
+  useEffect(() => {
+    if (!showModal && !showDeleteConfirm) return
+
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      if (showDeleteConfirm) {
+        setShowDeleteConfirm(false)
+        setUserToDelete(null)
+        return
+      }
+      if (showModal) {
+        setShowModal(false)
+        setEditingUser(null)
+        setPasswordError('')
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [showModal, showDeleteConfirm])
+
   const fetchUsers = async () => {
     try {
       const { data } = await api.get('/users')

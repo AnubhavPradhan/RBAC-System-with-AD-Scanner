@@ -91,6 +91,19 @@ const AuditLogs = () => {
     fetchLogs()
   }, [])
 
+  useEffect(() => {
+    if (!showClearConfirm) return
+
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setShowClearConfirm(false)
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [showClearConfirm])
+
   const fetchLogs = async () => {
     try {
       const { data } = await api.get('/audit-logs')
