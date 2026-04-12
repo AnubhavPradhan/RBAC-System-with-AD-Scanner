@@ -8,7 +8,16 @@ from typing import Optional
 
 from datetime import datetime
 from database import get_db, User, AuditLog, Role, Permission
-from auth import verify_password, hash_password, create_access_token, get_current_user, _time_policy_allowed, validate_password_strength
+from auth import (
+    verify_password,
+    hash_password,
+    create_access_token,
+    get_current_user,
+    get_current_token_payload,
+    revoke_token,
+    _time_policy_allowed,
+    validate_password_strength,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
@@ -143,7 +152,12 @@ def get_me(current_user: User = Depends(get_current_user), db: Session = Depends
 
 
 @router.post("/logout")
-def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def logout(
+    current_user: User = Depends(get_current_user),
+    token_payload: dict = Depends(get_current_token_payload),
+    db: Session = Depends(get_db),
+):
+    revoke_token(db, token_payload)
     db.add(AuditLog(user_email=current_user.email, action="Logout", resource="Auth",
                     details=f"User logged out: {current_user.email}", severity="Info"))
     db.commit()
