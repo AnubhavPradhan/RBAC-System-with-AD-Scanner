@@ -94,7 +94,7 @@ function App() {
           <Route
             path="/settings"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="manage_settings">
                 <Layout>
                   <Settings />
                 </Layout>

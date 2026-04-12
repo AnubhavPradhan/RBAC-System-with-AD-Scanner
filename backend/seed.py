@@ -8,6 +8,30 @@ from auth import hash_password
 def seed_database():
     db = SessionLocal()
     try:
+        perms_data = [
+            ("manage_users", "Create, edit, and delete users", "User Management"),
+            ("manage_roles", "Create, edit, and delete roles", "User Management"),
+            ("manage_permissions", "Create, edit, and delete permissions", "User Management"),
+            ("view_analytics", "View analytics dashboard", "Analytics"),
+            ("view_reports", "View and download reports", "Analytics"),
+            ("view_audit_logs", "View system audit logs", "System"),
+            ("manage_ad_scanner", "Run AD scans and view results", "System"),
+            ("manage_settings", "Access and manage application settings", "System"),
+        ]
+
+        # Always ensure default permissions exist, even for already-seeded databases.
+        existing_perms = {p.name: p for p in db.query(Permission).all()}
+        created_any_perm = False
+        for name, desc, cat in perms_data:
+            if name not in existing_perms:
+                p = Permission(name=name, description=desc, category=cat)
+                db.add(p)
+                existing_perms[name] = p
+                created_any_perm = True
+        if created_any_perm:
+            db.flush()
+            db.commit()
+
         if db.query(Role).count() > 0:
             return  # already seeded
 
@@ -19,19 +43,12 @@ def seed_database():
         db.flush()
 
         # ── Permissions ──
-        perms_data = [
-            ("manage_users", "Create, edit, and delete users", "User Management"),
-            ("manage_roles", "Create, edit, and delete roles", "User Management"),
-            ("manage_permissions", "Create, edit, and delete permissions", "User Management"),
-            ("view_analytics", "View analytics dashboard", "Analytics"),
-            ("view_reports", "View and download reports", "Analytics"),
-            ("view_audit_logs", "View system audit logs", "System"),
-            ("manage_ad_scanner", "Run AD scans and view results", "System"),
-        ]
         perm_objs = {}
         for name, desc, cat in perms_data:
-            p = Permission(name=name, description=desc, category=cat)
-            db.add(p)
+            p = existing_perms.get(name)
+            if p is None:
+                p = Permission(name=name, description=desc, category=cat)
+                db.add(p)
             perm_objs[name] = p
         db.flush()
 

@@ -94,6 +94,15 @@ class AuditLog(Base):
     severity = Column(String(20), default="Info")
 
 
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    jti = Column(String(100), unique=True, nullable=False)
+    user_id = Column(Integer, nullable=True)
+    revoked_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+
 # ── AD Scanner models ──
 class ADScanResult(Base):
     __tablename__ = "ad_scan_results"

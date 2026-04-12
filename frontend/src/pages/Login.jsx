@@ -55,7 +55,7 @@ const Login = () => {
       <PopupHost />
       <div className="rounded-2xl shadow-2xl w-full max-w-md p-8 border" style={{ backgroundColor: 'var(--app-surface-color)', borderColor: 'var(--app-border-color)' }}>
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white">Enhanced RBAC</h1>
+          <h1 className="text-3xl font-bold text-white">RBAC & AD Scanner</h1>
           
           {/* User sign up */}
           <p className="text-[#9aa3b2] mt-2">
@@ -154,31 +154,6 @@ const Login = () => {
           >
             {isLogin ? "Don't have an account? Sign Up" : 'Already have an account? Login'}
           </button>
-        </div>
-
-        {/* Default admin account for demo */}
-        <div className="mt-6 p-4 rounded-lg border" style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}>
-          {isLogin ? (
-            <>
-              <p className="text-sm text-[#d8deea] font-semibold mb-2">Default Admin Account:</p>
-              <div className="space-y-1">
-                <p className="text-xs text-[#c7cfdb]">
-                  <span className="font-medium">Username:</span> admin
-                </p>
-                <p className="text-xs text-[#c7cfdb]">
-                  <span className="font-medium">Email:</span> admin@gmail.com
-                </p>
-                <p className="text-xs text-[#c7cfdb]">
-                  <span className="font-medium">Password:</span> admin123
-                </p>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-[#d8deea] font-semibold mb-1">New Users:</p>
-              <p className="text-xs text-[#9aa3b2]">Will be assigned Viewer role by default. Contact admin for elevated access.</p>
-            </>
-          )}
         </div>
       </div>
     </div>

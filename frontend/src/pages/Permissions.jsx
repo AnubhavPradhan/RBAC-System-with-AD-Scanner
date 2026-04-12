@@ -28,6 +28,21 @@ const Permissions = () => {
     fetchPermissions()
   }, [])
 
+  useEffect(() => {
+    if (!showModal) return
+
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setShowModal(false)
+      setEditingPermission(null)
+      setFormData({ name: '', description: '', category: 'Content Management', status: 'Active', usedBy: [] })
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [showModal])
+
   const fetchPermissions = async () => {
     try {
       const { data } = await api.get('/permissions')

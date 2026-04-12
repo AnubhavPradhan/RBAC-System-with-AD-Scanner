@@ -14,7 +14,7 @@ const Sidebar = () => {
     { path: '/ad-scanner', name: 'AD Scanner', icon: '/icons/ad-scanner-logo.svg', permission: 'manage_ad_scanner' },
     { path: '/reports', name: 'Reports', icon: '/icons/Reports.png', permission: 'view_reports' },
     { path: '/audit-logs', name: 'Audit Logs', icon: '/icons/AuditLogs.png', permission: 'view_audit_logs' },
-    { path: '/settings', name: 'Settings', icon: '/icons/Settings.svg', permission: null },
+    { path: '/settings', name: 'Settings', icon: '/icons/Settings.svg', permission: 'manage_settings' },
   ]
 
   // Filter menu items based on user permissions

@@ -169,6 +169,94 @@ const ADScanner = () => {
   const [showResetPassword, setShowResetPassword] = useState(false)
   const [resetPasswordError, setResetPasswordError] = useState('')
 
+  useEffect(() => {
+    const hasOpenBox = Boolean(
+      notification ||
+      confirmDialog ||
+      showUserModal ||
+      showGroupAssignModal ||
+      showCreateGroupModal ||
+      showEditGroupModal ||
+      showOuModal ||
+      showEditOuModal ||
+      showComputerModal ||
+      showEditComputerModal ||
+      showMappingModal ||
+      showPasswordResetModal
+    )
+    if (!hasOpenBox) return
+
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+
+      if (confirmDialog) {
+        confirmDialog.onConfirm(false)
+        setConfirmDialog(null)
+        return
+      }
+      if (showPasswordResetModal) {
+        setShowPasswordResetModal(false)
+        return
+      }
+      if (showMappingModal) {
+        setShowMappingModal(false)
+        return
+      }
+      if (showEditComputerModal) {
+        setShowEditComputerModal(false)
+        return
+      }
+      if (showComputerModal) {
+        setShowComputerModal(false)
+        return
+      }
+      if (showEditOuModal) {
+        setShowEditOuModal(false)
+        return
+      }
+      if (showOuModal) {
+        setShowOuModal(false)
+        return
+      }
+      if (showEditGroupModal) {
+        setShowEditGroupModal(false)
+        return
+      }
+      if (showCreateGroupModal) {
+        setShowCreateGroupModal(false)
+        return
+      }
+      if (showGroupAssignModal) {
+        setShowGroupAssignModal(false)
+        return
+      }
+      if (showUserModal) {
+        setShowUserModal(false)
+        return
+      }
+      if (notification) {
+        setNotification(null)
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [
+    notification,
+    confirmDialog,
+    showUserModal,
+    showGroupAssignModal,
+    showCreateGroupModal,
+    showEditGroupModal,
+    showOuModal,
+    showEditOuModal,
+    showComputerModal,
+    showEditComputerModal,
+    showMappingModal,
+    showPasswordResetModal,
+  ])
+
   const formatScanTimestamp = (value) => {
     if (!value) return '-'
     return String(value).replace(/\.\d+$/, '')
@@ -311,6 +399,7 @@ const ADScanner = () => {
 
   useEffect(() => {
     if (activeTab === 'groups') fetchAdGroups()
+    if (activeTab === 'mappings') fetchAdGroups()
     if (activeTab === 'ous') fetchOus()
     if (activeTab === 'computers') fetchComputers()
     if (activeTab === 'dcs') fetchDcs()
@@ -371,6 +460,10 @@ const ADScanner = () => {
   }
 
   const openEditUser = async (user) => {
+    if (isSystemAccount(user?.sam_account_name)) {
+      showNotification('error', `System AD account '${user.sam_account_name}' cannot be edited`)
+      return
+    }
     setUserModalMode('edit')
     setEditingUserSam(user.sam_account_name)
     setUserForm({
@@ -462,6 +555,10 @@ const ADScanner = () => {
   }
 
   const handleDeleteUser = async (sam) => {
+    if (isSystemAccount(sam)) {
+      showNotification('error', `System AD account '${sam}' cannot be deleted`)
+      return
+    }
     const confirmed = await showConfirm(`Delete user '${sam}' from Active Directory? This cannot be undone.`)
     if (!confirmed) return
     try {
@@ -474,6 +571,10 @@ const ADScanner = () => {
   }
 
   const openPasswordReset = (user) => {
+    if (isSystemAccount(user?.sam_account_name)) {
+      showNotification('error', `Password reset is blocked for system AD account '${user.sam_account_name}'`)
+      return
+    }
     setPasswordResetUser(user)
     setResetPasswordForm({ new_password: '', confirm_password: '' })
     setShowResetPassword(false)
@@ -665,6 +766,7 @@ const ADScanner = () => {
   const riskLevels = scanData?.risk_levels || {}
 
   const SYSTEM_ACCOUNTS = ['guest', 'krbtgt']
+  const isSystemAccount = (sam) => SYSTEM_ACCOUNTS.includes(String(sam || '').toLowerCase())
   const filteredUsers = users.filter(u => {
     const matchesRisk = filterRisk === 'All' || u.risk_level === filterRisk
     const matchesSearch = !searchQuery ||
@@ -1151,7 +1253,9 @@ const ADScanner = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredUsers.map((user, idx) => (
+                {filteredUsers.map((user, idx) => {
+                  const protectedAccount = isSystemAccount(user.sam_account_name)
+                  return (
                   <React.Fragment key={idx}>
                     <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpandedUser(expandedUser === idx ? null : idx)}>
                       <td className="py-3 px-4">
@@ -1192,16 +1296,19 @@ const ADScanner = () => {
                       </td>
                       <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-3">
-                          <button onClick={() => openPasswordReset(user)} title="Reset password"
-                            className="text-gray-500 hover:text-orange-600 transition-colors">
+                          <button onClick={() => !protectedAccount && openPasswordReset(user)} title={protectedAccount ? 'System account password reset is blocked' : 'Reset password'}
+                            disabled={protectedAccount}
+                            className={`transition-colors ${protectedAccount ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:text-orange-600'}`}>
                             <AlertCircle className="w-4 h-4" />
                           </button>
-                          <button onClick={() => openEditUser(user)} title="Edit user"
-                            className="text-gray-500 hover:text-blue-600 transition-colors">
+                          <button onClick={() => !protectedAccount && openEditUser(user)} title={protectedAccount ? 'System account edit is blocked' : 'Edit user'}
+                            disabled={protectedAccount}
+                            className={`transition-colors ${protectedAccount ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:text-blue-600'}`}>
                             <Pencil className="w-4 h-4" />
                           </button>
-                          <button onClick={() => handleDeleteUser(user.sam_account_name)} title="Delete user"
-                            className="text-red-500 hover:text-red-700 transition-colors">
+                          <button onClick={() => !protectedAccount && handleDeleteUser(user.sam_account_name)} title={protectedAccount ? 'System account delete is blocked' : 'Delete user'}
+                            disabled={protectedAccount}
+                            className={`transition-colors ${protectedAccount ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:text-red-700'}`}>
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
@@ -1276,7 +1383,8 @@ const ADScanner = () => {
                       </tr>
                     )}
                   </React.Fragment>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -1900,7 +2008,12 @@ const ADScanner = () => {
                 <p className="text-sm text-gray-500">Automatically assign RBAC roles based on AD group membership</p>
               </div>
               <button
-                onClick={() => { setEditingMapping(null); setMappingForm({ ad_group: '', rbac_role: '' }); setShowMappingModal(true) }}
+                onClick={() => {
+                  setEditingMapping(null)
+                  setMappingForm({ ad_group: '', rbac_role: '' })
+                  if (adGroups.length === 0 && !groupsLoading) fetchAdGroups()
+                  setShowMappingModal(true)
+                }}
                 className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 transition-colors"
               >
                 + Add Mapping
@@ -1926,7 +2039,12 @@ const ADScanner = () => {
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
                         <button
-                          onClick={() => { setEditingMapping(m); setMappingForm({ ad_group: m.ad_group, rbac_role: m.rbac_role }); setShowMappingModal(true) }}
+                          onClick={() => {
+                            setEditingMapping(m)
+                            setMappingForm({ ad_group: m.ad_group, rbac_role: m.rbac_role })
+                            if (adGroups.length === 0 && !groupsLoading) fetchAdGroups()
+                            setShowMappingModal(true)
+                          }}
                           title="Edit mapping"
                           className="text-gray-500 hover:text-blue-600 transition-colors"
                         >
@@ -1968,7 +2086,7 @@ const ADScanner = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 overflow-hidden max-h-[90vh] flex flex-col">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
-              <h2 className="text-lg font-bold">{userModalMode === 'create' ? 'New User' : 'Edit User'}</h2>
+              <h2 className="text-lg font-bold">{userModalMode === 'create' ? 'New User' : 'Edit AD User'}</h2>
               <button onClick={() => setShowUserModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleSaveUser} className="p-5 space-y-3 overflow-y-auto flex-1">
@@ -2492,10 +2610,21 @@ const ADScanner = () => {
             <form onSubmit={handleSaveMapping}>
               <div className="mb-4">
                 <label className="block text-gray-700 text-sm font-bold mb-2">AD Group Name</label>
-                <input type="text" value={mappingForm.ad_group}
+                <select
+                  value={mappingForm.ad_group}
                   onChange={e => setMappingForm({ ...mappingForm, ad_group: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
-                  placeholder="e.g., Domain Admins, Web_Editors" required />
+                  required
+                  disabled={groupsLoading}
+                >
+                  <option value="">{groupsLoading ? 'Loading AD groups...' : '-- Select a group --'}</option>
+                  {!!mappingForm.ad_group && !adGroups.some(g => g.name === mappingForm.ad_group) && (
+                    <option value={mappingForm.ad_group}>{mappingForm.ad_group} (current)</option>
+                  )}
+                  {adGroups.map((g, i) => (
+                    <option key={g.dn || `${g.name}-${i}`} value={g.name}>{g.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="mb-6">
                 <label className="block text-gray-700 text-sm font-bold mb-2">RBAC Role</label>
@@ -2522,14 +2651,14 @@ const ADScanner = () => {
       {showPasswordResetModal && passwordResetUser && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="bg-gradient-to-r from-orange-600 to-amber-600 px-6 py-4 text-white flex items-center justify-between">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
               <h2 className="text-lg font-bold">Reset AD User Password</h2>
               <button onClick={() => setShowPasswordResetModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleResetPassword} className="p-6 space-y-4">
-              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-800">
+              <p className="text-sm text-gray-700">
                 <strong>User:</strong> {passwordResetUser.display_name} ({passwordResetUser.sam_account_name})
-              </div>
+              </p>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">New Password *</label>
                 <div className="relative">
@@ -2582,7 +2711,7 @@ const ADScanner = () => {
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowPasswordResetModal(false)}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" className="px-5 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium">Reset Password</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Reset Password</button>
               </div>
             </form>
           </div>

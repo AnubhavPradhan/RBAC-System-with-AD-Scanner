@@ -3,6 +3,7 @@ JWT authentication helpers.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from uuid import uuid4
 
 import bcrypt as _bcrypt
 from fastapi import Depends, HTTPException, status
@@ -11,7 +12,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from config import settings
-from database import get_db, User, Role, AuditLog
+from database import get_db, User, Role, AuditLog, RevokedToken
 
 security = HTTPBearer()
 NEPAL_TZ = timezone(timedelta(hours=5, minutes=45))
@@ -87,8 +88,14 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.JWT_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire})
+    now = datetime.utcnow()
+    expire = now + (expires_delta or timedelta(minutes=settings.JWT_EXPIRE_MINUTES))
+    to_encode.update({
+        "iat": now,
+        "exp": expire,
+        # jti guarantees a new token string for every login session.
+        "jti": str(uuid4()),
+    })
     return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
@@ -100,11 +107,46 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
 
+def revoke_token(db: Session, payload: dict) -> None:
+    jti = payload.get("jti")
+    exp = payload.get("exp")
+    if not jti or exp is None:
+        return
+
+    expires_at = datetime.fromtimestamp(exp, tz=timezone.utc).replace(tzinfo=None)
+    existing = db.query(RevokedToken).filter(RevokedToken.jti == jti).first()
+    if existing:
+        return
+
+    db.add(RevokedToken(
+        jti=jti,
+        user_id=payload.get("id"),
+        expires_at=expires_at,
+    ))
+
+
+def _is_token_revoked(db: Session, jti: Optional[str]) -> bool:
+    if not jti:
+        return False
+    return db.query(RevokedToken).filter(RevokedToken.jti == jti).first() is not None
+
+
+def _cleanup_expired_revoked_tokens(db: Session) -> None:
+    now = datetime.utcnow()
+    db.query(RevokedToken).filter(RevokedToken.expires_at <= now).delete(synchronize_session=False)
+    db.commit()
+
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
     payload = decode_token(credentials.credentials)
+    if not payload.get("jti"):
+        raise HTTPException(status_code=401, detail="Invalid token format. Please login again.")
+    _cleanup_expired_revoked_tokens(db)
+    if _is_token_revoked(db, payload.get("jti")):
+        raise HTTPException(status_code=401, detail="Token has been revoked. Please login again.")
     user_id = payload.get("id")
     if user_id is None:
         raise HTTPException(status_code=401, detail="Invalid token payload")
@@ -122,3 +164,16 @@ def get_current_user(
         db.commit()
         raise HTTPException(status_code=403, detail="Access denied due to time-based policy (NPT)")
     return user
+
+
+def get_current_token_payload(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+) -> dict:
+    payload = decode_token(credentials.credentials)
+    if not payload.get("jti"):
+        raise HTTPException(status_code=401, detail="Invalid token format. Please login again.")
+    _cleanup_expired_revoked_tokens(db)
+    if _is_token_revoked(db, payload.get("jti")):
+        raise HTTPException(status_code=401, detail="Token has been revoked. Please login again.")
+    return payload
