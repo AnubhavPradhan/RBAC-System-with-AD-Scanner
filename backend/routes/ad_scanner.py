@@ -20,6 +20,12 @@ router = APIRouter(prefix="/api/ad-scanner", tags=["AD Scanner"])
 
 LDAP_CONNECT_TIMEOUT_SECONDS = 3
 LDAP_RECEIVE_TIMEOUT_SECONDS = 3
+PROTECTED_AD_SYSTEM_ACCOUNTS = {"guest", "krbtgt"}
+
+
+def _assert_not_protected_system_account(sam_account_name: str) -> None:
+    if str(sam_account_name or "").strip().lower() in PROTECTED_AD_SYSTEM_ACCOUNTS:
+        raise HTTPException(403, f"Operation blocked for protected AD system account '{sam_account_name}'")
 
 
 class _NotificationBroker:
@@ -1760,6 +1766,7 @@ def update_ad_user(sam_account_name: str, body: ADUserUpdateRequest,
     """Update an existing AD user's attributes."""
     if current_user.role != "Admin":
         raise HTTPException(403, "Admin access required")
+    _assert_not_protected_system_account(sam_account_name)
     conn, cfg = _get_ldap_conn(db)
     try:
         from ldap3 import SUBTREE, MODIFY_REPLACE, MODIFY_DELETE
@@ -1853,6 +1860,7 @@ def delete_ad_user(sam_account_name: str,
     """Delete a user from Active Directory."""
     if current_user.role != "Admin":
         raise HTTPException(403, "Admin access required")
+    _assert_not_protected_system_account(sam_account_name)
     conn, cfg = _get_ldap_conn(db)
     try:
         from ldap3 import SUBTREE
@@ -1988,6 +1996,7 @@ def reset_ad_user_password(sam_account_name: str, body: ADUserPasswordResetReque
     """Reset an AD user's password. Requires Admin role and SSL/TLS connection."""
     if current_user.role != "Admin":
         raise HTTPException(403, "Admin access required")
+    _assert_not_protected_system_account(sam_account_name)
     
     # Validate password strength
     if not body.new_password or len(body.new_password) < 8:

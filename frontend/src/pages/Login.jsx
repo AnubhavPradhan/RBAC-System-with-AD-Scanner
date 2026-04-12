@@ -155,24 +155,6 @@ const Login = () => {
             {isLogin ? "Don't have an account? Sign Up" : 'Already have an account? Login'}
           </button>
         </div>
-
-        {/* Default admin account for demo */}
-        {isLogin && (
-          <div className="mt-6 p-4 rounded-lg border" style={{ backgroundColor: '#242632', borderColor: 'var(--app-border-color)' }}>
-            <p className="text-sm text-[#d8deea] font-semibold mb-2">Default Admin Account:</p>
-            <div className="space-y-1">
-              <p className="text-xs text-[#c7cfdb]">
-                <span className="font-medium">Username:</span> admin
-              </p>
-              <p className="text-xs text-[#c7cfdb]">
-                <span className="font-medium">Email:</span> admin@gmail.com
-              </p>
-              <p className="text-xs text-[#c7cfdb]">
-                <span className="font-medium">Password:</span> admin123
-              </p>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
