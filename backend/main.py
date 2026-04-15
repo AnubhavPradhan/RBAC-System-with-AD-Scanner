@@ -1,18 +1,16 @@
 """
-ERBAC with AD Scanner – FastAPI Backend
+RBAC with AD Scanner – FastAPI Backend
 Main application entry point.
 """
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import BackgroundTasks
 import logging
 
 from config import settings
 from database import init_db
 from seed import seed_database
-
 
 
 # ── Logging setup ──
@@ -23,8 +21,15 @@ async def lifespan(app: FastAPI):
     logging.info("[Startup] Initializing database...")
     init_db()
     logging.info("[Startup] Database initialized.")
+
+    logging.info("[Startup] Seeding database...")
+    try:
+        seed_database()
+        logging.info("[Startup] Database seeding complete.")
+    except Exception as e:
+        logging.error(f"[Startup] Database seeding failed: {e}")
+
     print(f"\U0001f680 {settings.APP_NAME} backend ready")
-    print(f"   AD Mock Mode: {settings.AD_USE_MOCK}")
     if settings.AD_SERVER:
         print(f"   AD Server: {settings.AD_SERVER}:{settings.AD_PORT}")
     yield
@@ -45,16 +50,6 @@ app = FastAPI(
     description="Enhanced Role-Based Access Control System with Active Directory Scanner",
     lifespan=lifespan,
 )
-
-# ── Seed database in background on startup ──
-@app.on_event("startup")
-async def seed_db_background():
-    logging.info("[Startup] Seeding database in background...")
-    try:
-        seed_database()
-        logging.info("[Startup] Database seeding complete.")
-    except Exception as e:
-        logging.error(f"[Startup] Database seeding failed: {e}")
 
 # ── CORS ──
 app.add_middleware(

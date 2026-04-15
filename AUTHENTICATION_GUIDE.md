@@ -141,7 +141,6 @@ Copy `backend/.env.example` to `backend/.env` and configure:
 JWT_SECRET=change_me_in_production
 DATABASE_URL=sqlite:///./data/rbac.db
 AD_SERVER=ldaps://dc.example.com
-AD_USE_MOCK=True
 ```
 
 ## 🐛 Troubleshooting
