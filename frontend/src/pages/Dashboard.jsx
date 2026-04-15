@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Users, ShieldCheck, Activity, Wifi, WifiOff } from 'lucide-react'
+import { Users, ShieldCheck, UserCheck, Wifi, WifiOff } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -31,7 +31,7 @@ const STAT_META = [
   },
   {
     label: 'Admin Users',
-    Icon: Activity,
+    Icon: UserCheck,
     valueColor: 'text-[#ff962e]',
     iconColor: 'text-[#ff962e]',
     iconBg: 'bg-[#3a2b24]'
