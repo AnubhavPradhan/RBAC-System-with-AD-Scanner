@@ -15,8 +15,6 @@ export const initializeDefaultData = () => {
         permissions: [
           'manage_users',
           'manage_roles',
-          'manage_permissions',
-          'view_analytics',
           'view_reports',
           'view_audit_logs'
         ],
@@ -25,10 +23,9 @@ export const initializeDefaultData = () => {
       {
         id: '2',
         name: 'Editor',
-        description: 'Can manage users and view analytics',
+        description: 'Can manage users and view reports',
         permissions: [
           'manage_users',
-          'view_analytics',
           'view_reports'
         ],
         createdAt: new Date().toISOString()
@@ -36,9 +33,8 @@ export const initializeDefaultData = () => {
       {
         id: '3',
         name: 'Viewer',
-        description: 'Read-only access to analytics and reports',
+        description: 'Read-only access to reports',
         permissions: [
-          'view_analytics',
           'view_reports'
         ],
         createdAt: new Date().toISOString()
@@ -67,22 +63,6 @@ export const initializeDefaultData = () => {
       },
       {
         id: '3',
-        name: 'manage_permissions',
-        description: 'Create, edit, and delete permissions',
-        module: 'Permissions',
-        status: 'Active',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: '4',
-        name: 'view_analytics',
-        description: 'View analytics dashboard',
-        module: 'Analytics',
-        status: 'Active',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: '5',
         name: 'view_reports',
         description: 'View and download reports',
         module: 'Reports',
@@ -90,7 +70,7 @@ export const initializeDefaultData = () => {
         createdAt: new Date().toISOString()
       },
       {
-        id: '6',
+        id: '4',
         name: 'view_audit_logs',
         description: 'View system audit logs',
         module: 'Audit Logs',

@@ -4,6 +4,9 @@ import api from '../utils/api'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const ROLE_ORDER_STORAGE_KEY = 'roles-card-order'
+const DEPRECATED_PERMISSIONS = new Set(['manage_permissions', 'view_analytics'])
+
+const isVisiblePermission = (permission = '') => !DEPRECATED_PERMISSIONS.has(permission)
 
 const formatPermissionLabel = (name = '') =>
   name
@@ -94,7 +97,11 @@ const Roles = () => {
   const fetchPermissions = async () => {
     try {
       const { data } = await api.get('/permissions')
-      setAvailablePermissions(data.map(p => p.name))
+      setAvailablePermissions(
+        data
+          .map(p => p.name)
+          .filter(isVisiblePermission)
+      )
     } catch (err) {
       console.error('Failed to fetch permissions:', err)
     }
@@ -110,12 +117,17 @@ const Roles = () => {
 
   const handleSubmitRole = async (e) => {
     e.preventDefault()
+    const payload = {
+      ...formData,
+      permissions: formData.permissions.filter(isVisiblePermission)
+    }
+
     try {
       if (editingRole) {
-        const { data } = await api.put(`/roles/${editingRole.id}`, formData)
+        const { data } = await api.put(`/roles/${editingRole.id}`, payload)
         setRoles(roles.map(r => r.id === editingRole.id ? data : r))
       } else {
-        const { data } = await api.post('/roles', formData)
+        const { data } = await api.post('/roles', payload)
         setRoles([...roles, data])
         setRoleOrder(prev => [...prev, String(data.id)])
       }
@@ -140,7 +152,7 @@ const Roles = () => {
     setFormData({
       name: role.name,
       description: role.description,
-      permissions: [...(role.permissions || [])],
+      permissions: [...(role.permissions || [])].filter(isVisiblePermission),
       time_restricted: !!role.time_restricted,
       allowed_days: Array.isArray(role.allowed_days) && role.allowed_days.length > 0 ? [...role.allowed_days] : [...DAYS],
       access_start_time: role.access_start_time || '09:00',
@@ -280,7 +292,7 @@ const Roles = () => {
             <div className="mb-4">
               <h4 className="text-sm font-semibold text-gray-700 mb-2">Permissions:</h4>
               <div className="flex flex-wrap gap-2">
-                {role.permissions.map((permission, index) => (
+                {(role.permissions || []).filter(isVisiblePermission).map((permission, index) => (
                   <span
                     key={index}
                     className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full"
