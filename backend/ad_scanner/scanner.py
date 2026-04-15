@@ -1,5 +1,5 @@
 """
-Core AD scanner: tries real LDAP first, falls back to mock data.
+Core AD scanner for real LDAP/LDAPS directory scanning.
 """
 import json
 import time
@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from database import ADScanResult, ADUser, AuditLog, ADConnectionConfig
-from ad_scanner.mock_ad import generate_mock_ad_users
 from ad_scanner.risk_engine import analyze_user_risk, generate_risk_summary
 
 logger = logging.getLogger(__name__)
