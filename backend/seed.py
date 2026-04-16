@@ -1,7 +1,7 @@
 """
 Database seeding – creates default roles, permissions, and admin user.
 """
-from database import SessionLocal, Role, Permission, User, role_permissions, ADGroupMapping
+from database import SessionLocal, Role, Permission, User, role_permissions
 from auth import hash_password
 
 
@@ -75,16 +75,6 @@ def seed_database():
             status="Active",
         )
         db.add(admin_user)
-
-        # ── Default AD group → RBAC role mappings ──
-        mappings = [
-            ADGroupMapping(ad_group="Domain Admins", rbac_role="Admin"),
-            ADGroupMapping(ad_group="Enterprise Admins", rbac_role="Admin"),
-            ADGroupMapping(ad_group="Web_Admins", rbac_role="Admin"),
-            ADGroupMapping(ad_group="Web_Editors", rbac_role="Editor"),
-            ADGroupMapping(ad_group="Domain Users", rbac_role="Viewer"),
-        ]
-        db.add_all(mappings)
 
         db.commit()
         print("✅ Database seeded with default data.")

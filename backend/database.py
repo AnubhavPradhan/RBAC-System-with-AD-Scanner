@@ -143,15 +143,6 @@ class ADUser(Base):
     risk_flags = Column(Text, default="[]")          # JSON array of risk flag strings
 
 
-class ADGroupMapping(Base):
-    """Maps AD group names → RBAC web roles for automatic role assignment."""
-    __tablename__ = "ad_group_mappings"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    ad_group = Column(String(200), unique=True, nullable=False)
-    rbac_role = Column(String(100), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
 class ADConnectionConfig(Base):
     """Stores AD connection settings configured via the web UI."""
     __tablename__ = "ad_connection_config"

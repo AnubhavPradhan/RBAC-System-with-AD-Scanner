@@ -105,12 +105,6 @@ const ADScanner = () => {
   const [filterRisk, setFilterRisk] = useState('All')
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedUser, setExpandedUser] = useState(null)
-  const [mappings, setMappings] = useState([])
-  const [roles, setRoles] = useState([])
-  const [syncResult, setSyncResult] = useState(null)
-  const [showMappingModal, setShowMappingModal] = useState(false)
-  const [mappingForm, setMappingForm] = useState({ ad_group: '', rbac_role: '' })
-  const [editingMapping, setEditingMapping] = useState(null)
   const [adGroups, setAdGroups] = useState([])
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [groupSearch, setGroupSearch] = useState('')
@@ -199,7 +193,6 @@ const ADScanner = () => {
       showEditOuModal ||
       showComputerModal ||
       showEditComputerModal ||
-      showMappingModal ||
       showPasswordResetModal
     )
     if (!hasOpenBox) return
@@ -215,10 +208,6 @@ const ADScanner = () => {
       }
       if (showPasswordResetModal) {
         setShowPasswordResetModal(false)
-        return
-      }
-      if (showMappingModal) {
-        setShowMappingModal(false)
         return
       }
       if (showEditComputerModal) {
@@ -271,7 +260,6 @@ const ADScanner = () => {
     showEditOuModal,
     showComputerModal,
     showEditComputerModal,
-    showMappingModal,
     showPasswordResetModal,
   ])
 
@@ -283,8 +271,6 @@ const ADScanner = () => {
   useEffect(() => {
     fetchConnectionStatus()
     fetchLatestScan()
-    fetchMappings()
-    fetchRoles()
   }, [])
 
   // ── Connection helpers ──
@@ -385,20 +371,6 @@ const ADScanner = () => {
     } catch (err) { console.error('Failed to fetch latest scan:', err) }
   }
 
-  const fetchMappings = async () => {
-    try {
-      const { data } = await api.get('/ad-scanner/mappings')
-      setMappings(data)
-    } catch (err) { console.error('Failed to fetch mappings:', err) }
-  }
-
-  const fetchRoles = async () => {
-    try {
-      const { data } = await api.get('/roles')
-      setRoles(data.map(r => r.name))
-    } catch (err) { console.error('Failed to fetch roles:', err) }
-  }
-
   const fetchAdGroups = async () => {
     setGroupsLoading(true)
     try {
@@ -437,7 +409,6 @@ const ADScanner = () => {
 
   useEffect(() => {
     if (activeTab === 'groups') fetchAdGroups()
-    if (activeTab === 'mappings') fetchAdGroups()
     if (activeTab === 'ous') fetchOus()
     if (activeTab === 'computers') fetchComputers()
     if (activeTab === 'dcs') fetchDcs()
@@ -445,43 +416,11 @@ const ADScanner = () => {
 
   const handleRunScan = async () => {
     setScanning(true)
-    setSyncResult(null)
     try {
       await api.post('/ad-scanner/scan')
       await fetchLatestScan()
     } catch (err) { showNotification('error', 'Scan failed: ' + (err.response?.data?.detail || err.message)) }
     finally { setScanning(false) }
-  }
-
-  const handleSyncRoles = async () => {
-    try {
-      const { data } = await api.post('/ad-scanner/sync-roles')
-      setSyncResult(data)
-    } catch (err) { showNotification('error', err.response?.data?.detail || 'Sync failed') }
-  }
-
-  const handleSaveMapping = async (e) => {
-    e.preventDefault()
-    try {
-      if (editingMapping) {
-        await api.put(`/ad-scanner/mappings/${editingMapping.id}`, mappingForm)
-      } else {
-        await api.post('/ad-scanner/mappings', mappingForm)
-      }
-      await fetchMappings()
-      setShowMappingModal(false)
-      setEditingMapping(null)
-      setMappingForm({ ad_group: '', rbac_role: '' })
-    } catch (err) { showNotification('error', err.response?.data?.detail || 'Operation failed') }
-  }
-
-  const handleDeleteMapping = async (id) => {
-    const confirmed = await showConfirm('Delete this mapping?')
-    if (!confirmed) return
-    try {
-      await api.delete(`/ad-scanner/mappings/${id}`)
-      await fetchMappings()
-    } catch (err) { showNotification('error', 'Delete failed') }
   }
 
   // ══════════════════════════════════════
@@ -832,7 +771,6 @@ const ADScanner = () => {
     { id: 'computers', label: 'Computers' },
     { id: 'dcs', label: 'Domain Controllers' },
     { id: 'risks', label: 'Risk Analysis' },
-    { id: 'mappings', label: 'Role Mappings' },
   ]
 
   // ── Loading state ──
@@ -943,14 +881,6 @@ const ADScanner = () => {
                 </button>
               </div>
             )}
-
-            <button
-              onClick={handleSyncRoles}
-              disabled={!scan}
-              className="bg-purple-600 text-white px-5 py-2.5 rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 flex items-center gap-2"
-            >
-              Sync AD → RBAC
-            </button>
             <button
               onClick={handleRunScan}
               disabled={scanning}
@@ -1115,19 +1045,6 @@ const ADScanner = () => {
           ────────────────────────────────────────── */}
       {isConnected && (
       <>
-      {/* Sync Result Banner */}
-      {syncResult && (
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6 flex items-center justify-between">
-          <div>
-            <p className="font-semibold text-purple-800">AD → RBAC Sync Complete</p>
-            <p className="text-sm text-purple-600">
-              Created: {syncResult.created} | Updated: {syncResult.updated} | Skipped: {syncResult.skipped}
-            </p>
-          </div>
-          <button onClick={() => setSyncResult(null)} className="text-purple-400 hover:text-purple-600">✕</button>
-        </div>
-      )}
-
       {/* Summary Cards */}
       {scan && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
@@ -1190,7 +1107,7 @@ const ADScanner = () => {
       </div>
 
       {/* Tab Content */}
-      {!scan && !['mappings','groups','ous','computers','dcs'].includes(activeTab) && (
+      {!scan && !['groups','ous','computers','dcs'].includes(activeTab) && (
         <div className="bg-white rounded-lg shadow-md p-12 text-center">
           <Shield className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-gray-700 mb-2">No Scan Data Available</h3>
@@ -2040,89 +1957,6 @@ const ADScanner = () => {
         </div>
       )}
 
-      {/* ─── Role Mappings Tab ─── */}
-      {activeTab === 'mappings' && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <h2 className="text-lg font-bold text-gray-800">AD Group → RBAC Role Mappings</h2>
-                <p className="text-sm text-gray-500">Automatically assign RBAC roles based on AD group membership</p>
-              </div>
-              <button
-                onClick={() => {
-                  setEditingMapping(null)
-                  setMappingForm({ ad_group: '', rbac_role: '' })
-                  if (adGroups.length === 0 && !groupsLoading) fetchAdGroups()
-                  setShowMappingModal(true)
-                }}
-                className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                + Add Mapping
-              </button>
-            </div>
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">AD Group</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">→</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">RBAC Role</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {mappings.map(m => (
-                  <tr key={m.id} className="hover:bg-gray-50">
-                    <td className="py-3 px-4 font-medium">{m.ad_group}</td>
-                    <td className="py-3 px-4 text-gray-400">→</td>
-                    <td className="py-3 px-4">
-                      <span className="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">{m.rbac_role}</span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => {
-                            setEditingMapping(m)
-                            setMappingForm({ ad_group: m.ad_group, rbac_role: m.rbac_role })
-                            if (adGroups.length === 0 && !groupsLoading) fetchAdGroups()
-                            setShowMappingModal(true)
-                          }}
-                          title="Edit mapping"
-                          className="text-gray-500 hover:text-blue-600 transition-colors"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteMapping(m.id)}
-                          title="Delete mapping"
-                          className="text-red-500 hover:text-red-700 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {mappings.length === 0 && (
-              <p className="text-gray-500 text-center py-8">No mappings configured. Add one to enable auto role sync.</p>
-            )}
-          </div>
-
-          {/* Info Panel */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-            <h3 className="font-semibold text-blue-900 mb-2">How Dynamic RBAC Works</h3>
-            <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
-              <li>Configure AD Group → RBAC Role mappings above</li>
-              <li>Run an AD Scan to discover domain users and their group memberships</li>
-              <li>Click "Sync AD → RBAC" to automatically create/update RBAC users</li>
-              <li>Users are assigned the highest-priority role from their AD groups</li>
-            </ol>
-          </div>
-        </div>
-      )}
-
       {/* ═══ Create / Edit User Modal ═══ */}
       {showUserModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -2673,53 +2507,6 @@ const ADScanner = () => {
                 <button type="button" onClick={() => setShowEditComputerModal(false)}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
                 <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Save</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Mapping Modal ─── */}
-      {showMappingModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-8 max-w-md w-full">
-            <h2 className="text-2xl font-bold mb-6 text-gray-800">
-              {editingMapping ? 'Edit Mapping' : 'Add Group Mapping'}
-            </h2>
-            <form onSubmit={handleSaveMapping}>
-              <div className="mb-4">
-                <label className="block text-gray-700 text-sm font-bold mb-2">AD Group Name</label>
-                <select
-                  value={mappingForm.ad_group}
-                  onChange={e => setMappingForm({ ...mappingForm, ad_group: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
-                  required
-                  disabled={groupsLoading}
-                >
-                  <option value="">{groupsLoading ? 'Loading AD groups...' : '-- Select a group --'}</option>
-                  {!!mappingForm.ad_group && !adGroups.some(g => g.name === mappingForm.ad_group) && (
-                    <option value={mappingForm.ad_group}>{mappingForm.ad_group} (current)</option>
-                  )}
-                  {adGroups.map((g, i) => (
-                    <option key={g.dn || `${g.name}-${i}`} value={g.name}>{g.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="mb-6">
-                <label className="block text-gray-700 text-sm font-bold mb-2">RBAC Role</label>
-                <select value={mappingForm.rbac_role}
-                  onChange={e => setMappingForm({ ...mappingForm, rbac_role: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white" required>
-                  <option value="">Select a role...</option>
-                  {roles.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
-              </div>
-              <div className="flex justify-end space-x-3">
-                <button type="button" onClick={() => { setShowMappingModal(false); setEditingMapping(null) }}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                  {editingMapping ? 'Update' : 'Create'}
-                </button>
               </div>
             </form>
           </div>
