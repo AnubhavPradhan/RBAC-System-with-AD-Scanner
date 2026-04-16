@@ -192,7 +192,6 @@ const AuditLogs = () => {
     { label: 'Total Events', value: logs.length, /*icon: '📝', color: 'bg-blue-500'*/ },
     { label: 'Critical Events', value: logs.filter(l => l.severity === 'Critical').length, /*icon: '🚨', color: 'bg-red-500'*/ },
     { label: 'Warnings', value: logs.filter(l => l.severity === 'Warning').length, /*icon: '⚠️', color: 'bg-yellow-500'*/ },
-    { label: 'Active Users', value: new Set(logs.map(l => l.user)).size, /*icon: '👥', color: 'bg-green-500'*/ },
   ]
 
   return (
@@ -200,7 +199,7 @@ const AuditLogs = () => {
       <h1 className="text-3xl font-bold text-white mb-8">Audit Logs</h1>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         {stats.map((stat, index) => (
           <div key={index} className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center justify-between">
