@@ -28,7 +28,6 @@ A full-stack **Enhanced Role-Based Access Control (RBAC)** system with an integr
 - **Stale Account Detection** — users inactive for 90+ days
 - **Weak Configuration Audit** — passwords that never expire, blank descriptions
 - **Risk Scoring Engine** — automated risk levels (Critical/High/Medium/Low) per user
-- **AD Group → RBAC Role Mapping** — auto-sync AD groups to RBAC roles
 - **Scan History** — track all scans with comparison
 
 ## Quick Start
@@ -80,7 +79,6 @@ The app opens at **http://localhost:5173**.
 
 - **3 Roles**: Admin (all permissions), Editor (manage_users, view_reports, view_analytics, view_audit_logs), Viewer (view_reports, view_analytics, view_audit_logs)
 - **7 Permissions**: manage_users, manage_roles, manage_permissions, view_reports, view_analytics, view_audit_logs, manage_ad_scanner
-- **5 AD Group Mappings**: Domain Admins → Admin, Enterprise Admins → Admin, Web_Admins → Admin, Web_Editors → Editor, Domain Users → Viewer
 
 ## AD Scanner Usage
 
@@ -89,8 +87,6 @@ The app opens at **http://localhost:5173**.
 3. Review the **Overview** tab for risk breakdown
 4. Check the **AD Users** tab to browse/search/filter accounts
 5. Review the **Risk Analysis** tab for privilege escalation, orphaned, and stale accounts
-6. Configure **Role Mappings** to map AD groups to RBAC roles
-7. Click **Sync AD → RBAC** to auto-create RBAC users from AD data
 
 ### Connecting to Real Active Directory
 
@@ -130,8 +126,6 @@ $env:AD_BIND_PASSWORD = "your-password"
 | GET    | /api/ad-scanner/latest              | Latest scan + users + risk |
 | GET    | /api/ad-scanner/scans               | Scan history               |
 | GET    | /api/ad-scanner/scans/:id/users     | Users from specific scan   |
-| CRUD   | /api/ad-scanner/mappings            | AD Group → Role mappings   |
-| POST   | /api/ad-scanner/sync-roles          | Sync AD users to RBAC      |
 
 ## Project Structure
 
