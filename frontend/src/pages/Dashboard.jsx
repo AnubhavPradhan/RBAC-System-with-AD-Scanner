@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Users, ShieldCheck, Lock, Activity, Wifi, WifiOff } from 'lucide-react'
+import { Users, ShieldCheck, UserCheck, Wifi, WifiOff } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -16,22 +16,22 @@ const STAT_META = [
     iconBg: 'bg-[#17315a]'
   },
   {
-    label: 'Active Roles',
-    Icon: ShieldCheck,
+    label: 'Active Users',
+    Icon: Users,
     valueColor: 'text-[#40e1b2]',
     iconColor: 'text-[#40e1b2]',
     iconBg: 'bg-[#133c43]'
   },
   {
-    label: 'Permissions',
-    Icon: Lock,
+    label: 'Active Roles',
+    Icon: ShieldCheck,
     valueColor: 'text-[#a88bff]',
     iconColor: 'text-[#a88bff]',
     iconBg: 'bg-[#28244d]'
   },
   {
     label: 'Admin Users',
-    Icon: Activity,
+    Icon: UserCheck,
     valueColor: 'text-[#ff962e]',
     iconColor: 'text-[#ff962e]',
     iconBg: 'bg-[#3a2b24]'
@@ -69,8 +69,8 @@ const Dashboard = () => {
         const { data } = await api.get('/reports/summary')
         setStats([
           { ...STAT_META[0], value: String(data.totalUsers) },
-          { ...STAT_META[1], value: String(data.totalRoles) },
-          { ...STAT_META[2], value: String(data.totalPermissions) },
+          { ...STAT_META[1], value: String(data.activeUsers) },
+          { ...STAT_META[2], value: String(data.totalRoles) },
           { ...STAT_META[3], value: String(data.totalUsers - (data.totalUsers - 1)) },
         ])
       } catch (err) {
