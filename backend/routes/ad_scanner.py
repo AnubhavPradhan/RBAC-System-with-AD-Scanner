@@ -692,6 +692,92 @@ def disconnect(current_user: User = Depends(get_current_user), db: Session = Dep
     return {"success": True, "message": "Disconnected"}
 
 
+def _dn_to_dns_name(dn: Optional[str]) -> str:
+    if not dn:
+        return ""
+    parts = [part.strip() for part in str(dn).split(",")]
+    labels = [part[3:] for part in parts if part.upper().startswith("DC=") and len(part) > 3]
+    return ".".join(labels)
+
+
+@router.get("/upn-suffixes")
+def get_upn_suffixes(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return allowed/known UPN suffixes for AD user logon names."""
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+
+    cfg = db.query(ADConnectionConfig).first()
+    if not cfg:
+        return {"suffixes": ["mylab.local"], "default_suffix": "mylab.local", "source": "default"}
+
+    suffixes: set[str] = set()
+    if cfg.domain:
+        suffixes.add(cfg.domain.strip().lower())
+
+    if not cfg.is_connected:
+        fallback = sorted(suffixes) or ["mylab.local"]
+        return {"suffixes": fallback, "default_suffix": fallback[0], "source": "config"}
+
+    conn = None
+    try:
+        from ldap3 import BASE, SUBTREE
+
+        conn, cfg = _get_ldap_conn(db)
+
+        conn.search(
+            search_base="",
+            search_filter="(objectClass=*)",
+            search_scope=BASE,
+            attributes=["defaultNamingContext", "configurationNamingContext", "rootDomainNamingContext"],
+        )
+
+        default_nc = ""
+        configuration_nc = ""
+        root_domain_nc = ""
+        if conn.entries:
+            root_entry = conn.entries[0]
+            default_nc = str(getattr(root_entry, "defaultNamingContext", "") or "")
+            configuration_nc = str(getattr(root_entry, "configurationNamingContext", "") or "")
+            root_domain_nc = str(getattr(root_entry, "rootDomainNamingContext", "") or "")
+
+        for dn_value in (default_nc, root_domain_nc, cfg.base_dn):
+            dns_name = _dn_to_dns_name(dn_value)
+            if dns_name:
+                suffixes.add(dns_name.lower())
+
+        if configuration_nc:
+            conn.search(
+                search_base=f"CN=Partitions,{configuration_nc}",
+                search_filter="(objectClass=crossRef)",
+                search_scope=SUBTREE,
+                attributes=["uPNSuffixes", "nCName"],
+            )
+            for entry in conn.entries:
+                upn_suffixes = getattr(entry, "uPNSuffixes", None)
+                if upn_suffixes:
+                    for value in upn_suffixes:
+                        text = str(value).strip().lower()
+                        if text and text != "[]":
+                            suffixes.add(text)
+
+                nc_name = str(getattr(entry, "nCName", "") or "")
+                dns_name = _dn_to_dns_name(nc_name)
+                if dns_name:
+                    suffixes.add(dns_name.lower())
+
+        resolved = sorted(suffixes) or ["mylab.local"]
+        return {"suffixes": resolved, "default_suffix": resolved[0], "source": "ldap"}
+    except Exception:
+        resolved = sorted(suffixes) or ["mylab.local"]
+        return {"suffixes": resolved, "default_suffix": resolved[0], "source": "fallback"}
+    finally:
+        try:
+            if conn is not None:
+                conn.unbind()
+        except Exception:
+            pass
+
+
 # ──────────────────────────────────────────
 # 1. Trigger a new scan
 # ──────────────────────────────────────────
