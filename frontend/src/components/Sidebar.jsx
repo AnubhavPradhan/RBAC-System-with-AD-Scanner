@@ -10,11 +10,10 @@ const Sidebar = () => {
     { path: '/dashboard', name: 'Dashboard', icon: '/icons/Dashboard.svg', permission: null },
     { path: '/users', name: 'Users', icon: '/icons/Users.svg', permission: 'manage_users' },
     { path: '/roles', name: 'Roles', icon: '/icons/Roles.png', permission: 'manage_roles' },
-    { path: '/permissions', name: 'Permissions', icon: '/icons/Permissions.png', permission: 'manage_permissions' },
-    { path: '/ad-scanner', name: 'AD Scanner', icon: '/icons/Active-directory.png', permission: 'manage_ad_scanner' },
+    { path: '/ad-scanner', name: 'AD Scanner', icon: '/icons/ad-scanner-logo.svg', permission: 'manage_ad_scanner' },
     { path: '/reports', name: 'Reports', icon: '/icons/Reports.png', permission: 'view_reports' },
     { path: '/audit-logs', name: 'Audit Logs', icon: '/icons/AuditLogs.png', permission: 'view_audit_logs' },
-    { path: '/settings', name: 'Settings', icon: '/icons/Settings.svg', permission: null },
+    { path: '/settings', name: 'Settings', icon: '/icons/Settings.svg', permission: 'manage_settings' },
   ]
 
   // Filter menu items based on user permissions
@@ -24,12 +23,12 @@ const Sidebar = () => {
 
   return (
     <aside
-      className="fixed top-[73px] left-0 w-64 h-[calc(100vh-73px)] text-white border-r border-[#2a2f42] overflow-y-auto"
+      className="fixed top-[76px] left-0 w-64 h-[calc(100vh-76px)] text-white border-r border-[#2a2a2a] overflow-y-auto"
       style={{ backgroundColor: 'var(--app-sidebar-color)' }}
     >
-      <div className="p-6">
+      <div className="p-4">
         <nav>
-          <ul className="space-y-2">
+          <ul className="space-y-1">
             {visibleMenuItems.map((item) => {
               const isActive = location.pathname === item.path
 
@@ -37,10 +36,10 @@ const Sidebar = () => {
                 <li key={item.path}>
                   <Link
                     to={item.path}
-                    className={`flex items-center space-x-3 px-4 py-3 rounded-2xl border transition-all duration-200 ${
+                    className={`flex items-center space-x-3 px-3 py-2.5 rounded-lg border transition-all duration-200 ${
                       isActive
-                        ? 'bg-[#162c5e] border-[#2a58b3] text-[#65a9ff] shadow-[0_10px_24px_rgba(0,0,0,0.28)]'
-                        : 'border-transparent text-[#8f9bb2] hover:bg-[#252a3a] hover:border-[#2f3c5d] hover:text-[#9dc5ff]'
+                        ? 'bg-[#323232] border-[#4b4b4b] text-white shadow-md'
+                        : 'border-transparent text-gray-400 hover:bg-[#2a2a2a] hover:text-gray-200'
                     }`}
                   >
                     {item.icon.startsWith('/') ? (

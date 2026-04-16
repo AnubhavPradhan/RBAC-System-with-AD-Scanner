@@ -1,4 +1,4 @@
-# ERBAC with Active Directory Scanner
+# RBAC with Active Directory Scanner
 
 A full-stack **Enhanced Role-Based Access Control (RBAC)** system with an integrated **Active Directory Scanner** module for enterprise security auditing.
 
@@ -103,7 +103,6 @@ $env:AD_USE_SSL = "true"
 $env:AD_BASE_DN = "DC=yourdomain,DC=com"
 $env:AD_BIND_USER = "CN=Scanner,OU=Service,DC=yourdomain,DC=com"
 $env:AD_BIND_PASSWORD = "your-password"
-$env:AD_USE_MOCK = "false"
 ```
 
 ## API Endpoints
@@ -145,9 +144,8 @@ $env:AD_USE_MOCK = "false"
 │   ├── seed.py               # Default data seeder
 │   ├── requirements.txt      # Python dependencies
 │   ├── ad_scanner/           # AD Scanner module
-│   │   ├── mock_ad.py        # Mock data generator
 │   │   ├── risk_engine.py    # Risk scoring engine
-│   │   └── scanner.py        # Core scanner (LDAP + mock)
+│   │   └── scanner.py        # Core LDAP scanner
 │   └── routes/               # API route handlers
 │       ├── auth_routes.py
 │       ├── users.py

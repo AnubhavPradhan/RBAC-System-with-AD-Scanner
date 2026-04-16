@@ -16,9 +16,8 @@ const ProtectedRoute = ({ children, requiredPermission }) => {
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <span className="text-6xl mb-4 block">🚫</span>
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">Access Denied</h1>
-          <p className="text-gray-600">You don't have permission to access this page.</p>
-          <p className="text-sm text-gray-500 mt-2">Required permission: {requiredPermission}</p>
+          <h1 className="text-5xl font-bold text-gray-800 mb-3">Access Denied</h1>
+          <p className="text-2xl text-gray-600">You don't have permission to access this page.</p>
         </div>
       </div>
     )

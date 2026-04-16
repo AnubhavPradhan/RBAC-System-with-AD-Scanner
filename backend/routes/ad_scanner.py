@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 
 from database import get_db, User, ADScanResult, ADUser, ADGroupMapping, ADConnectionConfig, AuditLog, Role, ADNotification
@@ -17,6 +17,15 @@ from auth import decode_token, get_current_user
 from ad_scanner.scanner import run_scan
 
 router = APIRouter(prefix="/api/ad-scanner", tags=["AD Scanner"])
+
+LDAP_CONNECT_TIMEOUT_SECONDS = 3
+LDAP_RECEIVE_TIMEOUT_SECONDS = 3
+PROTECTED_AD_SYSTEM_ACCOUNTS = {"guest", "krbtgt"}
+
+
+def _assert_not_protected_system_account(sam_account_name: str) -> None:
+    if str(sam_account_name or "").strip().lower() in PROTECTED_AD_SYSTEM_ACCOUNTS:
+        raise HTTPException(403, f"Operation blocked for protected AD system account '{sam_account_name}'")
 
 
 class _NotificationBroker:
@@ -70,6 +79,10 @@ class _NotificationBroker:
     def recent(self, limit: int = 25) -> list[dict]:
         with self._lock:
             return list(self._history)[:max(1, min(limit, 100))]
+
+    def clear(self) -> None:
+        with self._lock:
+            self._history.clear()
 
 
 notification_broker = _NotificationBroker()
@@ -353,6 +366,20 @@ def recent_notifications(
     return {"items": items}
 
 
+@router.delete("/notifications")
+def clear_notifications(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+
+    db.query(ADNotification).delete()
+    db.commit()
+    notification_broker.clear()
+    return {"message": "All AD notifications cleared"}
+
+
 @router.get("/notifications/stream")
 async def stream_notifications(
     request: Request,
@@ -497,6 +524,50 @@ def get_connection(current_user: User = Depends(get_current_user), db: Session =
     }
 
 
+@router.get("/status")
+def ad_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return AD connectivity state for UI status badges/cards.
+
+    This endpoint is intentionally non-throwing for offline AD so pages like
+    Dashboard can always render without surfacing cross-page connection errors.
+    """
+    cfg = db.query(ADConnectionConfig).first()
+    if not cfg:
+        return {
+            "configured": False,
+            "connected": False,
+            "message": "AD connection is not configured",
+        }
+
+    if not cfg.is_connected:
+        return {
+            "configured": True,
+            "connected": False,
+            "message": "AD connection is configured but currently disconnected",
+            "server": cfg.server,
+            "port": cfg.port,
+        }
+
+    try:
+        conn, _ = _get_ldap_conn(db, connect_timeout=2, receive_timeout=2)
+        conn.unbind()
+        return {
+            "configured": True,
+            "connected": True,
+            "message": "AD server is reachable",
+            "server": cfg.server,
+            "port": cfg.port,
+        }
+    except HTTPException as exc:
+        return {
+            "configured": True,
+            "connected": False,
+            "message": str(exc.detail),
+            "server": cfg.server,
+            "port": cfg.port,
+        }
+
+
 @router.post("/test-connection")
 def test_connection(body: ADConnectRequest, current_user: User = Depends(get_current_user)):
     """Test AD connection without saving."""
@@ -512,7 +583,7 @@ def test_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             use_ssl=body.use_ssl,
             tls=tls_config,
             get_info=ALL,
-            connect_timeout=10,
+            connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS,
         )
 
         auto = 'TLS_BEFORE_BIND' if (body.use_start_tls and not body.use_ssl) else True
@@ -522,7 +593,7 @@ def test_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             password=body.bind_password,
             auto_bind=auto,
             auto_referrals=False,
-            receive_timeout=10,
+            receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS,
         )
         enc = 'StartTLS' if body.use_start_tls else ('SSL' if body.use_ssl else 'plain')
         info = server.info
@@ -552,7 +623,7 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             use_ssl=body.use_ssl,
             tls=tls_config,
             get_info=ALL,
-            connect_timeout=10,
+            connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS,
         )
 
         auto = 'TLS_BEFORE_BIND' if (body.use_start_tls and not body.use_ssl) else True
@@ -562,7 +633,7 @@ def save_connection(body: ADConnectRequest, current_user: User = Depends(get_cur
             password=body.bind_password,
             auto_bind=auto,
             auto_referrals=False,
-            receive_timeout=10,
+            receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS,
         )
         conn.unbind()
         connected = True
@@ -619,6 +690,92 @@ def disconnect(current_user: User = Depends(get_current_user), db: Session = Dep
         ))
         db.commit()
     return {"success": True, "message": "Disconnected"}
+
+
+def _dn_to_dns_name(dn: Optional[str]) -> str:
+    if not dn:
+        return ""
+    parts = [part.strip() for part in str(dn).split(",")]
+    labels = [part[3:] for part in parts if part.upper().startswith("DC=") and len(part) > 3]
+    return ".".join(labels)
+
+
+@router.get("/upn-suffixes")
+def get_upn_suffixes(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return allowed/known UPN suffixes for AD user logon names."""
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+
+    cfg = db.query(ADConnectionConfig).first()
+    if not cfg:
+        return {"suffixes": ["mylab.local"], "default_suffix": "mylab.local", "source": "default"}
+
+    suffixes: set[str] = set()
+    if cfg.domain:
+        suffixes.add(cfg.domain.strip().lower())
+
+    if not cfg.is_connected:
+        fallback = sorted(suffixes) or ["mylab.local"]
+        return {"suffixes": fallback, "default_suffix": fallback[0], "source": "config"}
+
+    conn = None
+    try:
+        from ldap3 import BASE, SUBTREE
+
+        conn, cfg = _get_ldap_conn(db)
+
+        conn.search(
+            search_base="",
+            search_filter="(objectClass=*)",
+            search_scope=BASE,
+            attributes=["defaultNamingContext", "configurationNamingContext", "rootDomainNamingContext"],
+        )
+
+        default_nc = ""
+        configuration_nc = ""
+        root_domain_nc = ""
+        if conn.entries:
+            root_entry = conn.entries[0]
+            default_nc = str(getattr(root_entry, "defaultNamingContext", "") or "")
+            configuration_nc = str(getattr(root_entry, "configurationNamingContext", "") or "")
+            root_domain_nc = str(getattr(root_entry, "rootDomainNamingContext", "") or "")
+
+        for dn_value in (default_nc, root_domain_nc, cfg.base_dn):
+            dns_name = _dn_to_dns_name(dn_value)
+            if dns_name:
+                suffixes.add(dns_name.lower())
+
+        if configuration_nc:
+            conn.search(
+                search_base=f"CN=Partitions,{configuration_nc}",
+                search_filter="(objectClass=crossRef)",
+                search_scope=SUBTREE,
+                attributes=["uPNSuffixes", "nCName"],
+            )
+            for entry in conn.entries:
+                upn_suffixes = getattr(entry, "uPNSuffixes", None)
+                if upn_suffixes:
+                    for value in upn_suffixes:
+                        text = str(value).strip().lower()
+                        if text and text != "[]":
+                            suffixes.add(text)
+
+                nc_name = str(getattr(entry, "nCName", "") or "")
+                dns_name = _dn_to_dns_name(nc_name)
+                if dns_name:
+                    suffixes.add(dns_name.lower())
+
+        resolved = sorted(suffixes) or ["mylab.local"]
+        return {"suffixes": resolved, "default_suffix": resolved[0], "source": "ldap"}
+    except Exception:
+        resolved = sorted(suffixes) or ["mylab.local"]
+        return {"suffixes": resolved, "default_suffix": resolved[0], "source": "fallback"}
+    finally:
+        try:
+            if conn is not None:
+                conn.unbind()
+        except Exception:
+            pass
 
 
 # ──────────────────────────────────────────
@@ -955,11 +1112,11 @@ def list_ad_groups(current_user: User = Depends(get_current_user), db: Session =
             tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
             server = Server(
                 cfg.server, port=cfg.port, use_ssl=cfg.use_ssl,
-                tls=tls_config, get_info=ALL, connect_timeout=10,
+                tls=tls_config, get_info=ALL, connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS,
             )
             conn = Connection(
                 server, user=cfg.bind_user, password=cfg.bind_password,
-                auto_bind=True, auto_referrals=False, receive_timeout=15,
+                auto_bind=True, auto_referrals=False, receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS,
             )
 
             conn.search(
@@ -1091,11 +1248,11 @@ def sync_rbac_to_ad(current_user: User = Depends(get_current_user), db: Session 
 
         server = Server(
             cfg.server, port=cfg.port, use_ssl=cfg.use_ssl,
-            tls=tls_config, get_info=ALL, connect_timeout=10,
+            tls=tls_config, get_info=ALL, connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS,
         )
         conn = Connection(
             server, user=cfg.bind_user, password=cfg.bind_password,
-            auto_bind=True, auto_referrals=False, receive_timeout=15,
+            auto_bind=True, auto_referrals=False, receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS,
         )
 
         for rbac_user in rbac_users:
@@ -1219,8 +1376,8 @@ def list_ous(current_user: User = Depends(get_current_user), db: Session = Depen
         import ssl as ssl_mod
 
         tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
-        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
-        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=15)
+        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS)
 
         conn.search(
             search_base=cfg.base_dn,
@@ -1275,8 +1432,8 @@ def list_computers(current_user: User = Depends(get_current_user), db: Session =
         import ssl as ssl_mod
 
         tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
-        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
-        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=15)
+        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS)
 
         conn.search(
             search_base=cfg.base_dn,
@@ -1346,8 +1503,8 @@ def list_domain_controllers(current_user: User = Depends(get_current_user), db: 
         import ssl as ssl_mod
 
         tls_config = Tls(validate=ssl_mod.CERT_NONE) if cfg.use_ssl else None
-        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
-        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=15)
+        server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=LDAP_CONNECT_TIMEOUT_SECONDS)
+        conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=True, auto_referrals=False, receive_timeout=LDAP_RECEIVE_TIMEOUT_SECONDS)
 
         # primaryGroupID=516 means Domain Controllers
         conn.search(
@@ -1406,18 +1563,45 @@ def list_domain_controllers(current_user: User = Depends(get_current_user), db: 
 # ══════════════════════════════════════════
 # HELPER: get a bound LDAP connection
 # ══════════════════════════════════════════
-def _get_ldap_conn(db: Session):
+def _get_ldap_conn(
+    db: Session,
+    connect_timeout: int = LDAP_CONNECT_TIMEOUT_SECONDS,
+    receive_timeout: int = LDAP_RECEIVE_TIMEOUT_SECONDS,
+):
     """Return (conn, cfg) or raise 400."""
     cfg = db.query(ADConnectionConfig).first()
     if not cfg or not cfg.is_connected:
-        raise HTTPException(400, "No active AD connection.")
+        raise HTTPException(503, "AD server offline or not configured")
     from ldap3 import Server, Connection, ALL, Tls
     import ssl as ssl_mod
     tls_config = Tls(validate=ssl_mod.CERT_NONE, version=ssl_mod.PROTOCOL_TLS) if (cfg.use_ssl or cfg.use_start_tls) else None
-    server = Server(cfg.server, port=cfg.port, use_ssl=cfg.use_ssl, tls=tls_config, get_info=ALL, connect_timeout=10)
+    server = Server(
+        cfg.server,
+        port=cfg.port,
+        use_ssl=cfg.use_ssl,
+        tls=tls_config,
+        get_info=ALL,
+        connect_timeout=connect_timeout,
+    )
     auto = 'TLS_BEFORE_BIND' if (cfg.use_start_tls and not cfg.use_ssl) else True
-    conn = Connection(server, user=cfg.bind_user, password=cfg.bind_password, auto_bind=auto, auto_referrals=False, receive_timeout=15)
-    return conn, cfg
+    try:
+        conn = Connection(
+            server,
+            user=cfg.bind_user,
+            password=cfg.bind_password,
+            auto_bind=auto,
+            auto_referrals=False,
+            receive_timeout=receive_timeout,
+        )
+        return conn, cfg
+    except Exception:
+        # Mark stale connection state so UI can immediately reflect offline AD.
+        cfg.is_connected = False
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(503, "AD server offline")
 
 
 # ──────────────────────────────────────────
@@ -1428,12 +1612,18 @@ class ADUserCreateRequest(BaseModel):
     last_name: str = ""
     initials: str = ""
     full_name: str = ""
+    user_logon_name: Optional[str] = None
+    pre_windows_logon_name: Optional[str] = None
     sam_account_name: str
     upn_suffix: str = ""
     password: str
     description: str = ""
     enabled: bool = True
+    user_must_change_password_next_logon: bool = False
+    user_cannot_change_password: bool = False
     password_never_expires: bool = False
+    logon_to_all_computers: bool = True
+    logon_workstations: list[str] = Field(default_factory=list)
     ou_dn: str = ""  # target OU DN; empty → CN=Users
 
 
@@ -1443,13 +1633,68 @@ class ADUserUpdateRequest(BaseModel):
     initials: Optional[str] = None
     display_name: Optional[str] = None
     email: Optional[str] = None
+    user_logon_name: Optional[str] = None
+    pre_windows_logon_name: Optional[str] = None
+    upn_suffix: Optional[str] = None
     description: Optional[str] = None
     enabled: Optional[bool] = None
+    user_must_change_password_next_logon: Optional[bool] = None
+    user_cannot_change_password: Optional[bool] = None
     password_never_expires: Optional[bool] = None
+    logon_to_all_computers: Optional[bool] = None
+    logon_workstations: Optional[list[str]] = None
 
 
 class ADUserGroupRequest(BaseModel):
     group_dn: str
+
+
+def _normalize_workstation_list(values: Optional[list[str]]) -> list[str]:
+    if not values:
+        return []
+    cleaned: list[str] = []
+    seen = set()
+    for value in values:
+        text = str(value).strip().upper()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    return cleaned
+
+
+def _split_workstation_value(value: Optional[str]) -> list[str]:
+    if not value:
+        return []
+    return _normalize_workstation_list([part for part in str(value).split(",")])
+
+
+def _build_user_uac(*, current_uac: int = 512, enabled: Optional[bool] = None,
+                    password_never_expires: Optional[bool] = None,
+                    user_cannot_change_password: Optional[bool] = None) -> int:
+    uac = current_uac or 512
+    if enabled is not None:
+        if enabled:
+            uac &= ~0x0002
+        else:
+            uac |= 0x0002
+    if password_never_expires is not None:
+        if password_never_expires:
+            uac |= 0x10000
+        else:
+            uac &= ~0x10000
+    if user_cannot_change_password is not None:
+        if user_cannot_change_password:
+            uac |= 0x0040
+        else:
+            uac &= ~0x0040
+    return uac
+
+
+def _get_user_identity_values(body) -> tuple[str, str]:
+    upn_name = (getattr(body, "user_logon_name", None) or "").strip() or body.sam_account_name
+    pre_windows_name = (getattr(body, "pre_windows_logon_name", None) or "").strip() or body.sam_account_name
+    return upn_name, pre_windows_name
 
 
 @router.post("/users")
@@ -1459,7 +1704,8 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
         raise HTTPException(403, "Admin access required")
     conn, cfg = _get_ldap_conn(db)
     try:
-        from ldap3 import MODIFY_REPLACE
+        from ldap3 import MODIFY_REPLACE, MODIFY_DELETE
+        upn_name, pre_windows_name = _get_user_identity_values(body)
         display = body.full_name or f"{body.first_name} {body.last_name}".strip() or body.sam_account_name
         container = body.ou_dn if body.ou_dn else f"CN=Users,{cfg.base_dn}"
         user_dn = f"CN={display},{container}"
@@ -1468,11 +1714,11 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
         attrs = {
             "objectClass": ["top", "person", "organizationalPerson", "user"],
             "cn": display,
-            "sAMAccountName": body.sam_account_name,
-            "userPrincipalName": f"{body.sam_account_name}@{upn_suffix}",
+            "sAMAccountName": pre_windows_name,
+            "userPrincipalName": f"{upn_name}@{upn_suffix}",
             "displayName": display,
             "givenName": body.first_name,
-            "userAccountControl": 544,  # normal + password not required (temp)
+            "userAccountControl": 512,  # normal account; other flags set below
         }
         if body.last_name:
             attrs["sn"] = body.last_name
@@ -1499,15 +1745,25 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
             raise HTTPException(400, f"Failed to set password: {pwd_err}.{hint}")
 
         # Build UAC
-        uac = 512  # NORMAL_ACCOUNT
-        if not body.enabled:
-            uac |= 0x0002
-        if body.password_never_expires:
-            uac |= 0x10000
+        uac = _build_user_uac(
+            current_uac=512,
+            enabled=body.enabled,
+            password_never_expires=body.password_never_expires,
+            user_cannot_change_password=body.user_cannot_change_password,
+        )
         conn.modify(user_dn, {"userAccountControl": [(MODIFY_REPLACE, [str(uac)])]})
 
-        # Clear "User must change password at next logon" so the account can log in immediately
-        conn.modify(user_dn, {"pwdLastSet": [(MODIFY_REPLACE, ["-1"])]})
+        pwd_last_set_value = "0" if body.user_must_change_password_next_logon else "-1"
+        conn.modify(user_dn, {"pwdLastSet": [(MODIFY_REPLACE, [pwd_last_set_value])]})
+
+        workstation_values = _normalize_workstation_list(body.logon_workstations)
+        if body.logon_to_all_computers or not workstation_values:
+            try:
+                conn.modify(user_dn, {"userWorkstations": [(MODIFY_DELETE, [])]})
+            except Exception:
+                pass
+        else:
+            conn.modify(user_dn, {"userWorkstations": [(MODIFY_REPLACE, [",".join(workstation_values)])]})
 
         conn.unbind()
         db.add(AuditLog(user_email=current_user.email, action="Create", resource="AD User",
@@ -1535,21 +1791,82 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
             pass
 
 
+@router.get("/users/{sam_account_name}")
+def get_ad_user_details(sam_account_name: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return editable AD user attributes for the web form."""
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE
+        conn.search(
+            cfg.base_dn,
+            f"(&(objectClass=user)(sAMAccountName={sam_account_name}))",
+            search_scope=SUBTREE,
+            attributes=[
+                "distinguishedName", "givenName", "sn", "initials", "displayName", "mail",
+                "userPrincipalName", "sAMAccountName", "description", "userAccountControl",
+                "pwdLastSet", "userWorkstations",
+            ],
+        )
+        if not conn.entries:
+            raise HTTPException(404, f"User '{sam_account_name}' not found in AD")
+
+        entry = conn.entries[0]
+        upn = str(entry.userPrincipalName) if entry.userPrincipalName and str(entry.userPrincipalName) != "[]" else ""
+        upn_name = upn.split("@", 1)[0] if "@" in upn else upn
+        workstations = _split_workstation_value(str(entry.userWorkstations)) if entry.userWorkstations and str(entry.userWorkstations) != "[]" else []
+        uac = int(str(entry.userAccountControl)) if entry.userAccountControl else 512
+        password_never_expires = bool(uac & 0x10000)
+        user_cannot_change_password = bool(uac & 0x0040)
+        must_change_next_logon = str(entry.pwdLastSet) == "0"
+
+        return {
+            "sam_account_name": str(entry.sAMAccountName) if entry.sAMAccountName and str(entry.sAMAccountName) != "[]" else sam_account_name,
+            "pre_windows_logon_name": str(entry.sAMAccountName) if entry.sAMAccountName and str(entry.sAMAccountName) != "[]" else sam_account_name,
+            "user_logon_name": upn_name,
+            "upn_suffix": upn.split("@", 1)[1] if "@" in upn else (cfg.domain or ""),
+            "first_name": str(entry.givenName) if entry.givenName and str(entry.givenName) != "[]" else "",
+            "last_name": str(entry.sn) if entry.sn and str(entry.sn) != "[]" else "",
+            "initials": str(entry.initials) if entry.initials and str(entry.initials) != "[]" else "",
+            "full_name": str(entry.displayName) if entry.displayName and str(entry.displayName) != "[]" else "",
+            "email": str(entry.mail) if entry.mail and str(entry.mail) != "[]" else "",
+            "description": str(entry.description) if entry.description and str(entry.description) != "[]" else "",
+            "enabled": not bool(uac & 0x0002),
+            "user_must_change_password_next_logon": must_change_next_logon,
+            "user_cannot_change_password": user_cannot_change_password,
+            "password_never_expires": password_never_expires,
+            "logon_to_all_computers": not bool(workstations),
+            "logon_workstations": workstations,
+        }
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
 @router.put("/users/{sam_account_name}")
 def update_ad_user(sam_account_name: str, body: ADUserUpdateRequest,
                    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Update an existing AD user's attributes."""
     if current_user.role != "Admin":
         raise HTTPException(403, "Admin access required")
+    _assert_not_protected_system_account(sam_account_name)
     conn, cfg = _get_ldap_conn(db)
     try:
-        from ldap3 import SUBTREE, MODIFY_REPLACE
+        from ldap3 import SUBTREE, MODIFY_REPLACE, MODIFY_DELETE
         conn.search(cfg.base_dn, f"(&(objectClass=user)(sAMAccountName={sam_account_name}))",
-                     search_scope=SUBTREE, attributes=["distinguishedName", "userAccountControl"])
+                     search_scope=SUBTREE, attributes=["distinguishedName", "userAccountControl", "pwdLastSet", "userWorkstations", "userPrincipalName"])
         if not conn.entries:
             raise HTTPException(404, f"User '{sam_account_name}' not found in AD")
         user_dn = str(conn.entries[0].distinguishedName)
         current_uac = int(str(conn.entries[0].userAccountControl)) if conn.entries[0].userAccountControl else 512
+        current_upn = str(conn.entries[0].userPrincipalName) if conn.entries[0].userPrincipalName and str(conn.entries[0].userPrincipalName) != "[]" else ""
+        current_upn_suffix = current_upn.split("@", 1)[1] if "@" in current_upn else (cfg.domain or "mylab.local")
+        current_upn_name = current_upn.split("@", 1)[0] if "@" in current_upn else sam_account_name
+        current_sam = str(conn.entries[0].sAMAccountName) if hasattr(conn.entries[0], "sAMAccountName") and conn.entries[0].sAMAccountName and str(conn.entries[0].sAMAccountName) != "[]" else sam_account_name
+        current_workstations = _split_workstation_value(str(conn.entries[0].userWorkstations)) if conn.entries[0].userWorkstations and str(conn.entries[0].userWorkstations) != "[]" else []
 
         changes = {}
         if body.first_name is not None:
@@ -1564,21 +1881,33 @@ def update_ad_user(sam_account_name: str, body: ADUserUpdateRequest,
             changes["mail"] = [(MODIFY_REPLACE, [body.email])]
         if body.description is not None:
             changes["description"] = [(MODIFY_REPLACE, [body.description])]
+        if body.user_logon_name is not None or body.pre_windows_logon_name is not None or body.upn_suffix is not None:
+            upn_name = (body.user_logon_name or current_upn_name or sam_account_name).strip()
+            pre_windows_name = (body.pre_windows_logon_name or current_sam).strip()
+            upn_suffix = (body.upn_suffix or current_upn_suffix or cfg.domain or "mylab.local").strip()
+            if body.pre_windows_logon_name is not None:
+                changes["sAMAccountName"] = [(MODIFY_REPLACE, [pre_windows_name])]
+            changes["userPrincipalName"] = [(MODIFY_REPLACE, [f"{upn_name}@{upn_suffix}"])]
 
         # UAC changes
-        if body.enabled is not None or body.password_never_expires is not None:
-            uac = current_uac
-            if body.enabled is not None:
-                if body.enabled:
-                    uac &= ~0x0002
-                else:
-                    uac |= 0x0002
-            if body.password_never_expires is not None:
-                if body.password_never_expires:
-                    uac |= 0x10000
-                else:
-                    uac &= ~0x10000
+        if body.enabled is not None or body.password_never_expires is not None or body.user_cannot_change_password is not None:
+            uac = _build_user_uac(
+                current_uac=current_uac,
+                enabled=body.enabled,
+                password_never_expires=body.password_never_expires,
+                user_cannot_change_password=body.user_cannot_change_password,
+            )
             changes["userAccountControl"] = [(MODIFY_REPLACE, [str(uac)])]
+
+        if body.user_must_change_password_next_logon is not None:
+            changes["pwdLastSet"] = [(MODIFY_REPLACE, ["0" if body.user_must_change_password_next_logon else "-1"])]
+
+        if body.logon_to_all_computers is not None or body.logon_workstations is not None:
+            workstation_values = _normalize_workstation_list(body.logon_workstations) if body.logon_workstations is not None else current_workstations
+            if body.logon_to_all_computers or not workstation_values:
+                changes["userWorkstations"] = [(MODIFY_DELETE, [])]
+            else:
+                changes["userWorkstations"] = [(MODIFY_REPLACE, [",".join(workstation_values)])]
 
         if changes:
             ok = conn.modify(user_dn, changes)
@@ -1617,6 +1946,7 @@ def delete_ad_user(sam_account_name: str,
     """Delete a user from Active Directory."""
     if current_user.role != "Admin":
         raise HTTPException(403, "Admin access required")
+    _assert_not_protected_system_account(sam_account_name)
     conn, cfg = _get_ldap_conn(db)
     try:
         from ldap3 import SUBTREE
@@ -1739,6 +2069,95 @@ def remove_user_from_group(sam_account_name: str, body: ADUserGroupRequest,
 
 
 # ──────────────────────────────────────────
+# Password Reset Endpoint
+# ──────────────────────────────────────────
+class ADUserPasswordResetRequest(BaseModel):
+    sam_account_name: str
+    new_password: str
+
+
+@router.post("/users/{sam_account_name}/reset-password")
+def reset_ad_user_password(sam_account_name: str, body: ADUserPasswordResetRequest,
+                           current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Reset an AD user's password. Requires Admin role and SSL/TLS connection."""
+    if current_user.role != "Admin":
+        raise HTTPException(403, "Admin access required")
+    _assert_not_protected_system_account(sam_account_name)
+    
+    # Validate password strength
+    if not body.new_password or len(body.new_password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters long")
+    
+    conn, cfg = _get_ldap_conn(db)
+    try:
+        from ldap3 import SUBTREE, MODIFY_REPLACE
+        
+        # Verify connection is secure (SSL or StartTLS)
+        if not (cfg.use_ssl or cfg.use_start_tls):
+            raise HTTPException(400, "Password reset requires SSL or StartTLS connection for security")
+        
+        # Find the user
+        conn.search(cfg.base_dn, f"(&(objectClass=user)(sAMAccountName={sam_account_name}))",
+                     search_scope=SUBTREE, attributes=["distinguishedName"])
+        if not conn.entries:
+            raise HTTPException(404, f"User '{sam_account_name}' not found in AD")
+        
+        user_dn = str(conn.entries[0].distinguishedName)
+        
+        # Reset password by setting unicodePwd attribute
+        # In AD, passwords must be UTF-16LE encoded and wrapped in quotes
+        password_bytes = f'"{body.new_password}"'.encode('utf-16-le')
+        
+        changes = {
+            "unicodePwd": [(MODIFY_REPLACE, [password_bytes])]
+        }
+        
+        ok = conn.modify(user_dn, changes)
+        if not ok:
+            error_desc = conn.result.get('description', 'Unknown error')
+            # Common AD errors for password resets
+            if 'constraint violation' in error_desc.lower():
+                raise HTTPException(400, "Password does not meet AD complexity requirements")
+            elif 'access denied' in error_desc.lower():
+                raise HTTPException(403, "Access denied. Ensure bind account has permissions to reset passwords")
+            else:
+                raise HTTPException(400, f"Password reset failed: {error_desc}")
+        
+        conn.unbind()
+        
+        # Log the action
+        db.add(AuditLog(user_email=current_user.email, action="Reset Password", resource="AD User",
+                        details=f"Reset password for AD user '{sam_account_name}'", severity="Info"))
+        db.commit()
+        
+        # Publish notification
+        _publish_ad_notification(
+            db=db,
+            object_type="user",
+            action="password_reset",
+            name=sam_account_name,
+            changed_by=current_user.email,
+            source="app",
+            details="Password reset from AD Scanner UI",
+            distinguished_name=user_dn,
+        )
+        
+        return {"success": True, "message": f"Password reset successfully for user '{sam_account_name}'"}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Password reset failed: {str(e)}")
+    finally:
+        try:
+            conn.unbind()
+        except:
+            pass
+
+
+# ──────────────────────────────────────────
 # 13. AD Group CRUD
 # ──────────────────────────────────────────
 class ADGroupCreateRequest(BaseModel):
@@ -1750,6 +2169,9 @@ class ADGroupCreateRequest(BaseModel):
 
 
 class ADGroupUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    scope: Optional[str] = None
+    group_type: Optional[str] = None
     description: Optional[str] = None
 
 
@@ -1821,32 +2243,57 @@ def update_ad_group(group_cn: str, body: ADGroupUpdateRequest,
     try:
         from ldap3 import SUBTREE, MODIFY_REPLACE
         conn.search(cfg.base_dn, f"(&(objectClass=group)(cn={group_cn}))",
-                     search_scope=SUBTREE, attributes=["distinguishedName"])
+                     search_scope=SUBTREE, attributes=["distinguishedName", "groupType"])
         if not conn.entries:
             raise HTTPException(404, "Group not found")
         group_dn = str(conn.entries[0].distinguishedName)
+        target_cn = (body.name or "").strip() or group_cn
+
+        # Rename group CN first when requested.
+        if target_cn != group_cn:
+            rename_ok = conn.modify_dn(group_dn, f"CN={target_cn}")
+            if not rename_ok:
+                raise HTTPException(400, f"Rename failed: {conn.result.get('description', conn.result)}")
+            group_dn = _new_dn_with_rdn(group_dn, "CN", target_cn)
+
         changes = {}
         if body.description is not None:
             changes["description"] = [(MODIFY_REPLACE, [body.description])]
+
+        # Update group scope/type via groupType bitmask.
+        current_type_raw = int(str(conn.entries[0].groupType)) if conn.entries[0].groupType else 2
+        unsigned_type = current_type_raw if current_type_raw >= 0 else current_type_raw + (1 << 32)
+        current_scope = "Global"
+        if unsigned_type & 0x00000008:
+            current_scope = "Universal"
+        elif unsigned_type & 0x00000004:
+            current_scope = "DomainLocal"
+        current_group_type = "Security" if (unsigned_type & 0x80000000) else "Distribution"
+
+        target_scope = _normalize_group_scope(body.scope) or current_scope
+        target_group_type = _normalize_group_type(body.group_type) or current_group_type
+        if body.scope is not None or body.group_type is not None:
+            changes["groupType"] = [(MODIFY_REPLACE, [_group_type_value(target_scope, target_group_type)])]
+
         if changes:
             ok = conn.modify(group_dn, changes)
             if not ok:
                 raise HTTPException(400, f"Update failed: {conn.result.get('description', conn.result)}")
         conn.unbind()
         db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD Group",
-                        details=f"Updated AD group '{group_cn}'", severity="Info"))
+                        details=f"Updated AD group '{group_cn}'" + (f" -> '{target_cn}'" if target_cn != group_cn else ""), severity="Info"))
         db.commit()
         _publish_ad_notification(
             db=db,
             object_type="group",
             action="edited",
-            name=group_cn,
+            name=target_cn,
             changed_by=current_user.email,
             source="app",
             details="Updated from AD Scanner UI",
             distinguished_name=group_dn,
         )
-        return {"success": True, "message": f"Group '{group_cn}' updated"}
+        return {"success": True, "message": f"Group '{target_cn}' updated"}
     except HTTPException:
         raise
     except Exception as e:
@@ -1909,6 +2356,7 @@ class OUCreateRequest(BaseModel):
 
 
 class OUUpdateRequest(BaseModel):
+    name: Optional[str] = None
     description: Optional[str] = None
 
 
@@ -1953,32 +2401,40 @@ def create_ou(body: OUCreateRequest, current_user: User = Depends(get_current_us
 
 
 @router.put("/ous/update")
-def update_ou(dn: str = Query(...), description: str = Query(""),
+def update_ou(dn: str = Query(...), description: str = Query(""), name: Optional[str] = Query(None),
               current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if current_user.role != "Admin":
         raise HTTPException(403, "Admin access required")
     conn, cfg = _get_ldap_conn(db)
     try:
         from ldap3 import MODIFY_REPLACE
+        target_dn = dn
+
+        if name is not None and str(name).strip():
+            rename_ok = conn.modify_dn(dn, f"OU={str(name).strip()}")
+            if not rename_ok:
+                raise HTTPException(400, f"Rename failed: {conn.result.get('description', conn.result)}")
+            target_dn = _new_dn_with_rdn(dn, "OU", str(name).strip())
+
         changes = {"description": [(MODIFY_REPLACE, [description])]}
-        ok = conn.modify(dn, changes)
+        ok = conn.modify(target_dn, changes)
         if not ok:
             raise HTTPException(400, f"Update failed: {conn.result.get('description', conn.result)}")
         conn.unbind()
         db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD OU",
-                        details=f"Updated OU '{dn}'", severity="Info"))
+                        details=f"Updated OU '{dn}'" + (f" -> '{target_dn}'" if target_dn != dn else ""), severity="Info"))
         db.commit()
         _publish_ad_notification(
             db=db,
             object_type="ou",
             action="edited",
-            name=dn,
+            name=target_dn,
             changed_by=current_user.email,
             source="app",
             details="Updated from AD Scanner UI",
-            distinguished_name=dn,
+            distinguished_name=target_dn,
         )
-        return {"success": True, "message": "OU updated"}
+        return {"success": True, "message": "OU updated", "dn": target_dn}
     except HTTPException:
         raise
     except Exception as e:
@@ -2041,8 +2497,52 @@ class ComputerCreateRequest(BaseModel):
 
 
 class ComputerUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    dns_hostname: Optional[str] = None
+    os: Optional[str] = None
+    os_version: Optional[str] = None
     description: Optional[str] = None
     enabled: Optional[bool] = None
+
+
+def _normalize_group_scope(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().lower().replace("_", "").replace(" ", "")
+    if text in {"global"}:
+        return "Global"
+    if text in {"domainlocal", "local"}:
+        return "DomainLocal"
+    if text in {"universal"}:
+        return "Universal"
+    raise HTTPException(400, "Invalid group scope. Use DomainLocal, Global, or Universal")
+
+
+def _normalize_group_type(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text == "security":
+        return "Security"
+    if text == "distribution":
+        return "Distribution"
+    raise HTTPException(400, "Invalid group type. Use Security or Distribution")
+
+
+def _group_type_value(scope: str, group_type: str) -> str:
+    scope_val = {"Global": 0x00000002, "DomainLocal": 0x00000004, "Universal": 0x00000008}[scope]
+    value = scope_val | (0x80000000 if group_type == "Security" else 0)
+    # AD expects signed int32 representation for groupType.
+    if value >= 0x80000000:
+        value -= 0x100000000
+    return str(value)
+
+
+def _new_dn_with_rdn(existing_dn: str, rdn_prefix: str, new_value: str) -> str:
+    parts = [p for p in str(existing_dn).split(",") if p]
+    if len(parts) < 2:
+        raise HTTPException(400, "Invalid distinguishedName")
+    return f"{rdn_prefix}={new_value}," + ",".join(parts[1:])
 
 
 @router.post("/computers/create")
@@ -2102,15 +2602,39 @@ def update_computer(comp_cn: str, body: ComputerUpdateRequest,
         raise HTTPException(403, "Admin access required")
     conn, cfg = _get_ldap_conn(db)
     try:
-        from ldap3 import SUBTREE, MODIFY_REPLACE
+        from ldap3 import SUBTREE, MODIFY_REPLACE, MODIFY_DELETE
         conn.search(cfg.base_dn, f"(&(objectClass=computer)(cn={comp_cn}))",
                      search_scope=SUBTREE, attributes=["distinguishedName", "userAccountControl"])
         if not conn.entries:
             raise HTTPException(404, "Computer not found")
         comp_dn = str(conn.entries[0].distinguishedName)
+        requested_name = (body.name or "").strip() if body.name is not None else None
+        target_name = requested_name or comp_cn
+
+        if requested_name and target_name != comp_cn:
+            rename_ok = conn.modify_dn(comp_dn, f"CN={target_name}")
+            if not rename_ok:
+                raise HTTPException(400, f"Rename failed: {conn.result.get('description', conn.result)}")
+            comp_dn = _new_dn_with_rdn(comp_dn, "CN", target_name)
+
         changes = {}
+        if requested_name and target_name != comp_cn:
+            sam = target_name.upper()
+            if not sam.endswith("$"):
+                sam += "$"
+            changes["sAMAccountName"] = [(MODIFY_REPLACE, [sam])]
+        if body.dns_hostname is not None:
+            changes["dNSHostName"] = [(MODIFY_REPLACE, [body.dns_hostname])]
+        if body.os is not None:
+            changes["operatingSystem"] = [(MODIFY_REPLACE, [body.os])]
+        if body.os_version is not None:
+            changes["operatingSystemVersion"] = [(MODIFY_REPLACE, [body.os_version])]
         if body.description is not None:
-            changes["description"] = [(MODIFY_REPLACE, [body.description])]
+            cleaned_description = body.description.strip()
+            if cleaned_description:
+                changes["description"] = [(MODIFY_REPLACE, [cleaned_description])]
+            else:
+                changes["description"] = [(MODIFY_DELETE, [])]
         if body.enabled is not None:
             uac = int(str(conn.entries[0].userAccountControl)) if conn.entries[0].userAccountControl else 4096
             if body.enabled:
@@ -2124,19 +2648,19 @@ def update_computer(comp_cn: str, body: ComputerUpdateRequest,
                 raise HTTPException(400, f"Update failed: {conn.result.get('description', conn.result)}")
         conn.unbind()
         db.add(AuditLog(user_email=current_user.email, action="Update", resource="AD Computer",
-                        details=f"Updated computer '{comp_cn}'", severity="Info"))
+                        details=f"Updated computer '{comp_cn}'" + (f" -> '{target_name}'" if target_name != comp_cn else ""), severity="Info"))
         db.commit()
         _publish_ad_notification(
             db=db,
             object_type="computer",
             action="edited",
-            name=comp_cn,
+            name=target_name,
             changed_by=current_user.email,
             source="app",
             details="Updated from AD Scanner UI",
             distinguished_name=comp_dn,
         )
-        return {"success": True, "message": f"Computer '{comp_cn}' updated"}
+        return {"success": True, "message": f"Computer '{target_name}' updated"}
     except HTTPException:
         raise
     except Exception as e:
@@ -2187,5 +2711,6 @@ def delete_computer(comp_cn: str, current_user: User = Depends(get_current_user)
             conn.unbind()
         except:
             pass
+
 
 

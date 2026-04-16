@@ -8,7 +8,16 @@ from typing import Optional
 
 from datetime import datetime
 from database import get_db, User, AuditLog, Role, Permission
-from auth import verify_password, hash_password, create_access_token, get_current_user
+from auth import (
+    verify_password,
+    hash_password,
+    create_access_token,
+    get_current_user,
+    get_current_token_payload,
+    revoke_token,
+    _time_policy_allowed,
+    validate_password_strength,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
@@ -64,10 +73,16 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         db.add(AuditLog(user_email=body.email, action="Failed Login", resource="Auth",
                         details=f"Failed login attempt for: {body.email}", severity="Warning"))
         db.commit()
-        raise HTTPException(401, "Invalid email or password")
+        raise HTTPException(401, "Invalid username or password")
 
     if user.status == "Inactive":
         raise HTTPException(403, "Account is inactive. Contact administrator.")
+
+    if not _time_policy_allowed(db, user):
+        db.add(AuditLog(user_email=user.email, action="Denied Login", resource="Auth",
+                        details="Login denied by time-based policy (Asia/Kathmandu)", severity="Warning"))
+        db.commit()
+        raise HTTPException(403, "Login denied by time-based policy (NPT)")
 
     token = create_access_token({"id": user.id, "email": user.email, "role": user.role, "name": user.name})
 
@@ -84,6 +99,9 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 def signup(body: SignupRequest, db: Session = Depends(get_db)):
     if not body.name or not body.email or not body.password:
         raise HTTPException(400, "Name, email, and password are required")
+    is_valid, msg = validate_password_strength(body.password)
+    if not is_valid:
+        raise HTTPException(400, msg)
 
     existing = db.query(User).filter(
         (User.email == body.email) | (User.username == body.username)
@@ -101,6 +119,12 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
     )
     db.add(new_user)
     db.flush()
+
+    if not _time_policy_allowed(db, new_user):
+        db.add(AuditLog(user_email=new_user.email, action="Denied Signup Login", resource="Auth",
+                        details="Signup created user but login denied by time-based policy (Asia/Kathmandu)", severity="Warning"))
+        db.commit()
+        raise HTTPException(403, "Signup succeeded, but login is denied by time-based policy (NPT)")
 
     token = create_access_token({"id": new_user.id, "email": new_user.email, "role": new_user.role, "name": new_user.name})
 
@@ -128,7 +152,12 @@ def get_me(current_user: User = Depends(get_current_user), db: Session = Depends
 
 
 @router.post("/logout")
-def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def logout(
+    current_user: User = Depends(get_current_user),
+    token_payload: dict = Depends(get_current_token_payload),
+    db: Session = Depends(get_db),
+):
+    revoke_token(db, token_payload)
     db.add(AuditLog(user_email=current_user.email, action="Logout", resource="Auth",
                     details=f"User logged out: {current_user.email}", severity="Info"))
     db.commit()

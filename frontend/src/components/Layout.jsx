@@ -1,12 +1,14 @@
 import React from 'react'
 import Sidebar from './Sidebar'
 import Topbar from './Topbar'
+import PopupHost from './PopupHost'
 
 const Layout = ({ children }) => {
   return (
     <div className="app-shell min-h-screen" style={{ backgroundColor: 'var(--app-bg-color)' }}>
+      <PopupHost />
       <Topbar />
-      <div className="min-h-[calc(100vh-73px)]">
+      <div className="min-h-[calc(100vh-76px)]">
         <Sidebar />
         <main className="ml-64">
         <div className="p-8">

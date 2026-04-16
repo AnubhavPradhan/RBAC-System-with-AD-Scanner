@@ -1,22 +1,35 @@
 """
-ERBAC with AD Scanner – FastAPI Backend
+RBAC with AD Scanner – FastAPI Backend
 Main application entry point.
 """
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 
 from config import settings
 from database import init_db
 from seed import seed_database
 
 
+# ── Logging setup ──
+logging.basicConfig(level=logging.INFO)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logging.info("[Startup] Initializing database...")
     init_db()
-    seed_database()
+    logging.info("[Startup] Database initialized.")
+
+    logging.info("[Startup] Seeding database...")
+    try:
+        seed_database()
+        logging.info("[Startup] Database seeding complete.")
+    except Exception as e:
+        logging.error(f"[Startup] Database seeding failed: {e}")
+
     print(f"\U0001f680 {settings.APP_NAME} backend ready")
-    print(f"   AD Mock Mode: {settings.AD_USE_MOCK}")
     if settings.AD_SERVER:
         print(f"   AD Server: {settings.AD_SERVER}:{settings.AD_PORT}")
     yield
@@ -30,6 +43,7 @@ from routes.reports import router as reports_router
 from routes.ad_scanner import router as ad_scanner_router
 
 # ── Create app ──
+
 app = FastAPI(
     title=settings.APP_NAME,
     version="2.0.0",

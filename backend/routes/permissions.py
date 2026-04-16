@@ -12,6 +12,19 @@ from auth import get_current_user
 router = APIRouter(prefix="/api/permissions", tags=["Permissions"])
 
 
+def _ensure_manage_settings_permission(db: Session) -> None:
+    existing = db.query(Permission).filter(Permission.name == "manage_settings").first()
+    if existing:
+        return
+    db.add(Permission(
+        name="manage_settings",
+        description="Access and manage application settings",
+        category="System",
+        status="Active",
+    ))
+    db.commit()
+
+
 class PermissionBody(BaseModel):
     name: str
     description: Optional[str] = ""
@@ -30,6 +43,7 @@ def _perm_dict(db: Session, p: Permission) -> dict:
 
 @router.get("")
 def list_permissions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _ensure_manage_settings_permission(db)
     perms = db.query(Permission).all()
     return [_perm_dict(db, p) for p in perms]
 

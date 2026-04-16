@@ -94,7 +94,7 @@ const Settings = () => {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-gray-800 mb-8">Settings</h1>
+      <h1 className="text-3xl font-bold text-white mb-8">Settings</h1>
 
       {/* Tabs */}
       <div className="bg-white rounded-lg shadow-md mb-8">
@@ -122,20 +122,11 @@ const Settings = () => {
           <h2 className="text-xl font-semibold text-gray-800 mb-6">General Settings</h2>
           <div className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Site Name</label>
-              <input
-                type="text"
-                value={generalSettings.siteName}
-                onChange={(e) => handleGeneralChange('siteName', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Timezone</label>
               <select
                 value={generalSettings.timezone}
                 onChange={(e) => handleGeneralChange('timezone', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
               >
                 <option>UTC</option>
                 <option>EST</option>
@@ -149,7 +140,7 @@ const Settings = () => {
               <select
                 value={generalSettings.language}
                 onChange={(e) => handleGeneralChange('language', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
               >
                 <option>English</option>
                 <option>Spanish</option>
@@ -162,7 +153,7 @@ const Settings = () => {
               <select
                 value={generalSettings.dateFormat}
                 onChange={(e) => handleGeneralChange('dateFormat', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
               >
                 <option>MM/DD/YYYY</option>
                 <option>DD/MM/YYYY</option>
@@ -186,7 +177,7 @@ const Settings = () => {
                 type="number"
                 value={securitySettings.sessionTimeout}
                 onChange={(e) => handleSecurityChange('sessionTimeout', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
             <div>
@@ -197,7 +188,7 @@ const Settings = () => {
                 type="number"
                 value={securitySettings.passwordExpiry}
                 onChange={(e) => handleSecurityChange('passwordExpiry', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
             <div>
@@ -208,7 +199,7 @@ const Settings = () => {
                 type="number"
                 value={securitySettings.loginAttempts}
                 onChange={(e) => handleSecurityChange('loginAttempts', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
             <div className="flex items-center justify-between py-3 border-b">
@@ -339,7 +330,7 @@ const Settings = () => {
               <select
                 value={backupSettings.backupFrequency}
                 onChange={(e) => handleBackupChange('backupFrequency', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
               >
                 <option value="hourly">Hourly</option>
                 <option value="daily">Daily</option>
@@ -355,7 +346,7 @@ const Settings = () => {
                 type="number"
                 value={backupSettings.retentionDays}
                 onChange={(e) => handleBackupChange('retentionDays', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
             <div className="mt-6 p-4 bg-gray-50 rounded-lg">

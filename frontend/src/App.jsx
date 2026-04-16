@@ -8,7 +8,6 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Users from './pages/Users'
 import Roles from './pages/Roles'
-import Permissions from './pages/Permissions'
 import Reports from './pages/Reports'
 import AuditLogs from './pages/AuditLogs'
 import Settings from './pages/Settings'
@@ -52,16 +51,6 @@ function App() {
             }
           />
           <Route
-            path="/permissions"
-            element={
-              <ProtectedRoute requiredPermission="manage_permissions">
-                <Layout>
-                  <Permissions />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
             path="/reports"
             element={
               <ProtectedRoute requiredPermission="view_reports">
@@ -94,7 +83,7 @@ function App() {
           <Route
             path="/settings"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="manage_settings">
                 <Layout>
                   <Settings />
                 </Layout>

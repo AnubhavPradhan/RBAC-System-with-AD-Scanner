@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Shield, AlertTriangle, Users, UserX, Key, RefreshCw, ChevronDown, ChevronUp, Search, Server, Wifi, WifiOff, Plug, Unplug, Eye, EyeOff, XCircle, CheckCircle, Info, AlertCircle, X, Plus, Pencil, Trash2, UserPlus, UserMinus, Monitor } from 'lucide-react'
+import { Shield, AlertTriangle, Users, UserX, RefreshCw, ChevronDown, ChevronUp, Search, Server, Wifi, WifiOff, Plug, Unplug, Eye, EyeOff, XCircle, CheckCircle, Info, AlertCircle, X, Plus, Pencil, Trash2, UserPlus, UserMinus, Monitor } from 'lucide-react'
 import api from '../utils/api'
 
 const RISK_COLORS = {
@@ -16,6 +16,25 @@ const RISK_BG = {
   Medium: 'bg-yellow-500',
   Low: 'bg-green-500',
 }
+
+const createDefaultAdUserForm = (domain = '') => ({
+  first_name: '',
+  last_name: '',
+  initials: '',
+  full_name: '',
+  user_logon_name: '',
+  sam_account_name: '',
+  upn_suffix: domain,
+  password: '',
+  description: '',
+  enabled: true,
+  user_must_change_password_next_logon: false,
+  user_cannot_change_password: false,
+  password_never_expires: false,
+  logon_to_all_computers: true,
+  logon_workstations: [],
+  ou_dn: '',
+})
 
 const ADScanner = () => {
   // ── Connection state ──
@@ -36,9 +55,38 @@ const ADScanner = () => {
     domain: '',
   })
 
+  // ── SSE Notification Stream ──
+  useEffect(() => {
+    if (!connection?.connected) return
+
+    let eventSource = null
+
+    // Optionally delay stream start for better UX
+    const timer = setTimeout(() => {
+      const token = localStorage.getItem('rbac-token')
+      if (!token) return
+
+      eventSource = new EventSource(`/api/ad-scanner/notifications/stream?token=${token}`)
+      eventSource.onmessage = () => {
+        // You can handle notifications here, e.g.:
+        // showNotification('info', event.data)
+      }
+      eventSource.onerror = () => {
+        // Keep failures isolated to AD Scanner only.
+        if (eventSource) eventSource.close()
+      }
+    }, 1000) // 1s delay for UI render
+
+    return () => {
+      clearTimeout(timer)
+      if (eventSource) eventSource.close()
+    }
+  }, [connection?.connected])
+
   // ── Notification / Confirm state ──
   const [notification, setNotification] = useState(null)   // { type: 'error'|'success'|'warning'|'info', message }
   const [confirmDialog, setConfirmDialog] = useState(null) // { message, onConfirm }
+  const [showAdUserPassword, setShowAdUserPassword] = useState(false)
 
   const showNotification = useCallback((type, message) => {
     setNotification({ type, message })
@@ -82,7 +130,8 @@ const ADScanner = () => {
   // ── CRUD: User ──
   const [showUserModal, setShowUserModal] = useState(false)
   const [userModalMode, setUserModalMode] = useState('create')
-  const [userForm, setUserForm] = useState({ first_name: '', last_name: '', initials: '', full_name: '', sam_account_name: '', upn_suffix: '', password: '', description: '', enabled: true, password_never_expires: false, ou_dn: '' })
+  const [userForm, setUserForm] = useState(createDefaultAdUserForm())
+  const [upnSuffixOptions, setUpnSuffixOptions] = useState([])
   const [editingUserSam, setEditingUserSam] = useState(null)
   const [showGroupAssignModal, setShowGroupAssignModal] = useState(false)
   const [groupAssignUser, setGroupAssignUser] = useState(null)
@@ -93,26 +142,138 @@ const ADScanner = () => {
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false)
   const [createGroupForm, setCreateGroupForm] = useState({ name: '', scope: 'Global', group_type: 'Security', description: '', ou_dn: '' })
   const [showEditGroupModal, setShowEditGroupModal] = useState(false)
-  const [editGroupForm, setEditGroupForm] = useState({ description: '' })
+  const [editGroupForm, setEditGroupForm] = useState({ name: '', scope: 'Global', group_type: 'Security', description: '' })
   const [editGroupCn, setEditGroupCn] = useState('')
 
   // ── CRUD: OU ──
   const [showOuModal, setShowOuModal] = useState(false)
   const [ouForm, setOuForm] = useState({ name: '', description: '', parent_dn: '' })
   const [showEditOuModal, setShowEditOuModal] = useState(false)
-  const [editOuForm, setEditOuForm] = useState({ description: '' })
+  const [editOuForm, setEditOuForm] = useState({ name: '', description: '' })
   const [editOuDn, setEditOuDn] = useState('')
 
   // ── CRUD: Computer ──
   const [showComputerModal, setShowComputerModal] = useState(false)
   const [computerForm, setComputerForm] = useState({ name: '', ou_dn: '', description: '' })
   const [showEditComputerModal, setShowEditComputerModal] = useState(false)
-  const [editComputerForm, setEditComputerForm] = useState({ description: '', enabled: true })
+  const [editComputerForm, setEditComputerForm] = useState({ name: '', dns_hostname: '', os: '', os_version: '', description: '', enabled: true })
   const [editComputerCn, setEditComputerCn] = useState('')
 
   // ── Domain Controllers ──
   const [dcs, setDcs] = useState([])
   const [dcsLoading, setDcsLoading] = useState(false)
+
+  // ── Password Reset ──
+  const [showPasswordResetModal, setShowPasswordResetModal] = useState(false)
+  const [passwordResetUser, setPasswordResetUser] = useState(null)
+  const [resetPasswordForm, setResetPasswordForm] = useState({ new_password: '', confirm_password: '' })
+  const [showResetPassword, setShowResetPassword] = useState(false)
+  const [resetPasswordError, setResetPasswordError] = useState('')
+
+  const preWindowsDomainPrefix = `${(connection?.config?.domain || 'mylab').split('.')[0].toUpperCase()}\\`
+  const resolvedUpnSuffixOptions = upnSuffixOptions.length > 0
+    ? upnSuffixOptions
+    : [connection?.config?.domain || 'mylab.local']
+
+  const normalizeUpnSuffixes = useCallback((values = [], fallback = '') => {
+    const unique = new Set()
+    values.forEach((value) => {
+      const cleaned = String(value || '').trim().toLowerCase()
+      if (cleaned) unique.add(cleaned)
+    })
+    const fallbackCleaned = String(fallback || '').trim().toLowerCase()
+    if (fallbackCleaned) unique.add(fallbackCleaned)
+    if (unique.size === 0) unique.add('mylab.local')
+    return Array.from(unique).sort((a, b) => a.localeCompare(b))
+  }, [])
+
+  useEffect(() => {
+    const hasOpenBox = Boolean(
+      notification ||
+      confirmDialog ||
+      showUserModal ||
+      showGroupAssignModal ||
+      showCreateGroupModal ||
+      showEditGroupModal ||
+      showOuModal ||
+      showEditOuModal ||
+      showComputerModal ||
+      showEditComputerModal ||
+      showMappingModal ||
+      showPasswordResetModal
+    )
+    if (!hasOpenBox) return
+
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+
+      if (confirmDialog) {
+        confirmDialog.onConfirm(false)
+        setConfirmDialog(null)
+        return
+      }
+      if (showPasswordResetModal) {
+        setShowPasswordResetModal(false)
+        return
+      }
+      if (showMappingModal) {
+        setShowMappingModal(false)
+        return
+      }
+      if (showEditComputerModal) {
+        setShowEditComputerModal(false)
+        return
+      }
+      if (showComputerModal) {
+        setShowComputerModal(false)
+        return
+      }
+      if (showEditOuModal) {
+        setShowEditOuModal(false)
+        return
+      }
+      if (showOuModal) {
+        setShowOuModal(false)
+        return
+      }
+      if (showEditGroupModal) {
+        setShowEditGroupModal(false)
+        return
+      }
+      if (showCreateGroupModal) {
+        setShowCreateGroupModal(false)
+        return
+      }
+      if (showGroupAssignModal) {
+        setShowGroupAssignModal(false)
+        return
+      }
+      if (showUserModal) {
+        setShowUserModal(false)
+        return
+      }
+      if (notification) {
+        setNotification(null)
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [
+    notification,
+    confirmDialog,
+    showUserModal,
+    showGroupAssignModal,
+    showCreateGroupModal,
+    showEditGroupModal,
+    showOuModal,
+    showEditOuModal,
+    showComputerModal,
+    showEditComputerModal,
+    showMappingModal,
+    showPasswordResetModal,
+  ])
 
   const formatScanTimestamp = (value) => {
     if (!value) return '-'
@@ -131,6 +292,7 @@ const ADScanner = () => {
     try {
       const { data } = await api.get('/ad-scanner/connection')
       setConnection(data)
+      const connectionDomain = data?.config?.domain || ''
       if (data.config) {
         setConnForm(prev => ({
           ...prev,
@@ -143,15 +305,36 @@ const ADScanner = () => {
           domain: data.config.domain || '',
         }))
       }
+      await fetchUpnSuffixes(connectionDomain)
     } catch (err) { console.error('Connection status check failed:', err) }
     finally { setConnectionLoading(false) }
   }
+
+  const fetchUpnSuffixes = useCallback(async (fallbackDomain = '') => {
+    try {
+      const { data } = await api.get('/ad-scanner/upn-suffixes')
+      const options = normalizeUpnSuffixes(
+        data?.suffixes || [],
+        data?.default_suffix || fallbackDomain || connection?.config?.domain || ''
+      )
+      setUpnSuffixOptions(options)
+      return options
+    } catch (err) {
+      const options = normalizeUpnSuffixes([], fallbackDomain || connection?.config?.domain || '')
+      setUpnSuffixOptions(options)
+      return options
+    }
+  }, [connection?.config?.domain, normalizeUpnSuffixes])
 
   const handleTestConnection = async () => {
     setTesting(true)
     setTestResult(null)
     try {
-      const { data } = await api.post('/ad-scanner/test-connection', connForm)
+      const payload = {
+        ...connForm,
+        port: connForm.use_ssl ? 636 : 389,
+      }
+      const { data } = await api.post('/ad-scanner/test-connection', payload)
       setTestResult(data)
     } catch (err) {
       setTestResult({ success: false, message: err.response?.data?.detail || err.message })
@@ -163,9 +346,14 @@ const ADScanner = () => {
     setConnecting(true)
     setTestResult(null)
     try {
-      const { data } = await api.post('/ad-scanner/connect', connForm)
+      const payload = {
+        ...connForm,
+        port: connForm.use_ssl ? 636 : 389,
+      }
+      const { data } = await api.post('/ad-scanner/connect', payload)
       if (data.success) {
-        setConnection({ connected: true, config: connForm })
+        setConnection({ connected: true, config: payload })
+        await fetchUpnSuffixes(payload.domain || '')
         setTestResult({ success: true, message: data.message })
       } else {
         setTestResult({ success: false, message: data.message })
@@ -182,6 +370,7 @@ const ADScanner = () => {
     try {
       await api.post('/ad-scanner/disconnect')
       setConnection({ connected: false, config: null })
+      setUpnSuffixOptions(['mylab.local'])
       setConnForm({ server: '', port: 389, use_ssl: false, use_start_tls: false, base_dn: '', bind_user: '', bind_password: '', domain: '' })
       setTestResult(null)
     } catch (err) { showNotification('error', 'Failed to disconnect') }
@@ -248,6 +437,7 @@ const ADScanner = () => {
 
   useEffect(() => {
     if (activeTab === 'groups') fetchAdGroups()
+    if (activeTab === 'mappings') fetchAdGroups()
     if (activeTab === 'ous') fetchOus()
     if (activeTab === 'computers') fetchComputers()
     if (activeTab === 'dcs') fetchDcs()
@@ -301,49 +491,105 @@ const ADScanner = () => {
   // ── User CRUD ──
   const openCreateUser = () => {
     setUserModalMode('create')
-    setUserForm({ first_name: '', last_name: '', initials: '', full_name: '', sam_account_name: '', upn_suffix: connection?.config?.domain || '', password: '', description: '', enabled: true, password_never_expires: false, ou_dn: '' })
+    const defaultSuffix = resolvedUpnSuffixOptions[0] || connection?.config?.domain || ''
+    setUserForm(createDefaultAdUserForm(defaultSuffix))
+    setShowAdUserPassword(false)
     setShowUserModal(true)
+    if (computers.length === 0 && !computersLoading) fetchComputers()
   }
 
-  const openEditUser = (user) => {
+  const openEditUser = async (user) => {
+    if (isSystemAccount(user?.sam_account_name)) {
+      showNotification('error', `System AD account '${user.sam_account_name}' cannot be edited`)
+      return
+    }
     setUserModalMode('edit')
     setEditingUserSam(user.sam_account_name)
+    const initialSuffix = user.upn_suffix || connection?.config?.domain || ''
+    setUpnSuffixOptions(prev => normalizeUpnSuffixes(prev, initialSuffix))
     setUserForm({
       first_name: user.display_name?.split(' ')[0] || '',
       last_name: user.display_name?.split(' ').slice(1).join(' ') || '',
       initials: '',
       full_name: user.display_name || '',
-      sam_account_name: user.sam_account_name,
-      upn_suffix: '',
+      user_logon_name: user.user_logon_name || user.email?.split('@')[0] || user.sam_account_name || '',
+      sam_account_name: user.sam_account_name || '',
+      upn_suffix: user.upn_suffix || connection?.config?.domain || '',
       password: '',
       description: user.description || '',
       enabled: user.enabled,
+      user_must_change_password_next_logon: !!user.user_must_change_password_next_logon,
+      user_cannot_change_password: !!user.user_cannot_change_password,
       password_never_expires: user.password_never_expires || false,
+      logon_to_all_computers: user.logon_to_all_computers !== false,
+      logon_workstations: Array.isArray(user.logon_workstations) ? user.logon_workstations : [],
       ou_dn: '',
     })
+    setShowAdUserPassword(false)
     setShowUserModal(true)
+    if (computers.length === 0 && !computersLoading) fetchComputers()
+
+    try {
+      const { data } = await api.get(`/ad-scanner/users/${user.sam_account_name}`)
+      setUpnSuffixOptions(prev => normalizeUpnSuffixes(prev, data.upn_suffix || connection?.config?.domain || ''))
+      setUserForm(prev => ({
+        ...prev,
+        first_name: data.first_name || prev.first_name,
+        last_name: data.last_name || prev.last_name,
+        initials: data.initials || prev.initials,
+        full_name: data.full_name || prev.full_name,
+        user_logon_name: data.user_logon_name || prev.user_logon_name,
+        sam_account_name: data.pre_windows_logon_name || data.sam_account_name || prev.sam_account_name,
+        upn_suffix: data.upn_suffix || prev.upn_suffix,
+        description: data.description ?? prev.description,
+        enabled: typeof data.enabled === 'boolean' ? data.enabled : prev.enabled,
+        user_must_change_password_next_logon: typeof data.user_must_change_password_next_logon === 'boolean' ? data.user_must_change_password_next_logon : prev.user_must_change_password_next_logon,
+        user_cannot_change_password: typeof data.user_cannot_change_password === 'boolean' ? data.user_cannot_change_password : prev.user_cannot_change_password,
+        password_never_expires: typeof data.password_never_expires === 'boolean' ? data.password_never_expires : prev.password_never_expires,
+        logon_to_all_computers: typeof data.logon_to_all_computers === 'boolean' ? data.logon_to_all_computers : prev.logon_to_all_computers,
+        logon_workstations: Array.isArray(data.logon_workstations) ? data.logon_workstations : prev.logon_workstations,
+      }))
+    } catch (err) {
+      console.error('Failed to load AD user details:', err)
+    }
   }
 
   const handleSaveUser = async (e) => {
     e.preventDefault()
     try {
       if (userModalMode === 'create') {
-        await api.post('/ad-scanner/users', userForm)
-        showNotification('success', `User '${userForm.sam_account_name}' created successfully`)
+        const payload = {
+          ...userForm,
+          sam_account_name: userForm.sam_account_name || userForm.user_logon_name,
+          pre_windows_logon_name: userForm.sam_account_name || userForm.user_logon_name,
+        }
+        await api.post('/ad-scanner/users', payload)
+        showNotification('success', `User '${payload.sam_account_name}' created successfully`)
       } else {
-        await api.put(`/ad-scanner/users/${editingUserSam}`, {
+        const payload = {
           first_name: userForm.first_name || undefined,
           last_name: userForm.last_name || undefined,
           initials: userForm.initials || undefined,
           display_name: userForm.full_name || undefined,
           email: userForm.email || undefined,
+          user_logon_name: userForm.user_logon_name || undefined,
+          pre_windows_logon_name: userForm.sam_account_name || undefined,
+          upn_suffix: userForm.upn_suffix || undefined,
           description: userForm.description,
           enabled: userForm.enabled,
+          user_must_change_password_next_logon: userForm.user_must_change_password_next_logon,
+          user_cannot_change_password: userForm.user_cannot_change_password,
           password_never_expires: userForm.password_never_expires,
+          logon_to_all_computers: userForm.logon_to_all_computers,
+          logon_workstations: userForm.logon_workstations,
+        }
+        await api.put(`/ad-scanner/users/${editingUserSam}`, {
+          ...payload,
         })
         showNotification('success', `User '${editingUserSam}' updated successfully`)
       }
       setShowUserModal(false)
+      setUserForm(createDefaultAdUserForm(connection?.config?.domain || ''))
       await handleRunScan()
     } catch (err) {
       showNotification('error', err.response?.data?.detail || 'Operation failed')
@@ -351,6 +597,10 @@ const ADScanner = () => {
   }
 
   const handleDeleteUser = async (sam) => {
+    if (isSystemAccount(sam)) {
+      showNotification('error', `System AD account '${sam}' cannot be deleted`)
+      return
+    }
     const confirmed = await showConfirm(`Delete user '${sam}' from Active Directory? This cannot be undone.`)
     if (!confirmed) return
     try {
@@ -359,6 +609,57 @@ const ADScanner = () => {
       await handleRunScan()
     } catch (err) {
       showNotification('error', err.response?.data?.detail || 'Delete failed')
+    }
+  }
+
+  const openPasswordReset = (user) => {
+    if (isSystemAccount(user?.sam_account_name)) {
+      showNotification('error', `Password reset is blocked for system AD account '${user.sam_account_name}'`)
+      return
+    }
+    setPasswordResetUser(user)
+    setResetPasswordForm({ new_password: '', confirm_password: '' })
+    setShowResetPassword(false)
+    setResetPasswordError('')
+    setShowPasswordResetModal(true)
+  }
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault()
+    setResetPasswordError('')
+
+    if (!resetPasswordForm.new_password || !resetPasswordForm.confirm_password) {
+      setResetPasswordError('Both password fields are required')
+      return
+    }
+
+    if (resetPasswordForm.new_password !== resetPasswordForm.confirm_password) {
+      setResetPasswordError('Passwords do not match')
+      return
+    }
+
+    if (resetPasswordForm.new_password.length < 8) {
+      setResetPasswordError('Password must be at least 8 characters long')
+      return
+    }
+
+    if (!/[A-Z]/.test(resetPasswordForm.new_password) || !/[a-z]/.test(resetPasswordForm.new_password) || 
+        !/[0-9]/.test(resetPasswordForm.new_password) || !/[^A-Za-z0-9]/.test(resetPasswordForm.new_password)) {
+      setResetPasswordError('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character')
+      return
+    }
+
+    try {
+      await api.post(`/ad-scanner/users/${passwordResetUser.sam_account_name}/reset-password`, {
+        sam_account_name: passwordResetUser.sam_account_name,
+        new_password: resetPasswordForm.new_password
+      })
+      showNotification('success', `Password reset successfully for user '${passwordResetUser.sam_account_name}'`)
+      setShowPasswordResetModal(false)
+      setPasswordResetUser(null)
+      setResetPasswordForm({ new_password: '', confirm_password: '' })
+    } catch (err) {
+      showNotification('error', err.response?.data?.detail || 'Password reset failed')
     }
   }
 
@@ -400,8 +701,8 @@ const ADScanner = () => {
   const handleUpdateGroup = async (e) => {
     e.preventDefault()
     try {
-      await api.put(`/ad-scanner/groups/${editGroupCn}`, { description: editGroupForm.description })
-      showNotification('success', `Group '${editGroupCn}' updated`)
+      await api.put(`/ad-scanner/groups/${editGroupCn}`, editGroupForm)
+      showNotification('success', `Group '${editGroupForm.name || editGroupCn}' updated`)
       setShowEditGroupModal(false)
       await fetchAdGroups()
     } catch (err) {
@@ -438,7 +739,7 @@ const ADScanner = () => {
   const handleUpdateOu = async (e) => {
     e.preventDefault()
     try {
-      await api.put(`/ad-scanner/ous/update?dn=${encodeURIComponent(editOuDn)}&description=${encodeURIComponent(editOuForm.description)}`)
+      await api.put(`/ad-scanner/ous/update?dn=${encodeURIComponent(editOuDn)}&description=${encodeURIComponent(editOuForm.description)}&name=${encodeURIComponent(editOuForm.name || '')}`)
       showNotification('success', 'OU updated')
       setShowEditOuModal(false)
       await fetchOus()
@@ -476,7 +777,11 @@ const ADScanner = () => {
   const handleUpdateComputer = async (e) => {
     e.preventDefault()
     try {
-      await api.put(`/ad-scanner/computers/${editComputerCn}`, editComputerForm)
+      const payload = {
+        description: editComputerForm.description,
+        enabled: editComputerForm.enabled,
+      }
+      await api.put(`/ad-scanner/computers/${editComputerCn}`, payload)
       showNotification('success', `Computer '${editComputerCn}' updated`)
       setShowEditComputerModal(false)
       await fetchComputers()
@@ -503,6 +808,7 @@ const ADScanner = () => {
   const riskLevels = scanData?.risk_levels || {}
 
   const SYSTEM_ACCOUNTS = ['guest', 'krbtgt']
+  const isSystemAccount = (sam) => SYSTEM_ACCOUNTS.includes(String(sam || '').toLowerCase())
   const filteredUsers = users.filter(u => {
     const matchesRisk = filterRisk === 'All' || u.risk_level === filterRisk
     const matchesSearch = !searchQuery ||
@@ -540,10 +846,10 @@ const ADScanner = () => {
 
   // ── Notification config ──
   const notificationConfig = {
-    error:   { icon: XCircle,       bg: 'bg-[#1e1f28]',  border: 'border-red-500/60',    icon_color: 'text-red-500',    title: 'Error' },
-    success: { icon: CheckCircle,   bg: 'bg-[#1e1f28]',  border: 'border-green-500/60',  icon_color: 'text-green-500',  title: 'Success' },
-    warning: { icon: AlertCircle,   bg: 'bg-[#1e1f28]',  border: 'border-yellow-500/60', icon_color: 'text-yellow-500', title: 'Warning' },
-    info:    { icon: Info,          bg: 'bg-[#1e1f28]',  border: 'border-blue-500/60',   icon_color: 'text-blue-500',   title: 'Information' },
+    error:   { icon: XCircle,       bg: 'bg-[#1f1f1f]',  border: 'border-red-500/60',    icon_color: 'text-red-500',    title: 'Error' },
+    success: { icon: CheckCircle,   bg: 'bg-[#1f1f1f]',  border: 'border-green-500/60',  icon_color: 'text-green-500',  title: 'Success' },
+    warning: { icon: AlertCircle,   bg: 'bg-[#1f1f1f]',  border: 'border-yellow-500/60', icon_color: 'text-yellow-500', title: 'Warning' },
+    info:    { icon: Info,          bg: 'bg-[#1f1f1f]',  border: 'border-blue-500/60',   icon_color: 'text-blue-500',   title: 'Information' },
   }
 
   return (
@@ -561,12 +867,12 @@ const ADScanner = () => {
                   <Icon className="w-7 h-7" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-base font-semibold text-[#e8efff] mb-1">{cfg.title}</h3>
-                  <p className="text-sm text-[#b6c2da] break-words">{notification.message}</p>
+                  <h3 className="text-base font-semibold text-white mb-1">{cfg.title}</h3>
+                  <p className="text-sm text-gray-300 break-words">{notification.message}</p>
                 </div>
                 <button
                   onClick={() => setNotification(null)}
-                  className="flex-shrink-0 text-[#8f9bb2] hover:text-[#d4ddf3] transition-colors"
+                  className="flex-shrink-0 text-gray-400 hover:text-gray-200 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -619,13 +925,12 @@ const ADScanner = () => {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-blue-100 flex items-center gap-3">
-            <Shield className="w-8 h-8 text-blue-600" />
-            Active Directory Scanner
-          </h1>
-          <p className="text-gray-600 mt-1">
-            Scan domain users, detect risky accounts, and enforce access policies
-          </p>
+          <h1 className="text-3xl font-bold text-white">Active Directory Scanner</h1>
+          {!isConnected && (
+            <p className="text-gray-600 mt-1">
+              Enter your domain controller details to scan domain users, detect risky accounts, and enforce access policies
+            </p>
+          )}
         </div>
         {isConnected && (
           <div className="flex gap-3 items-center">
@@ -644,7 +949,7 @@ const ADScanner = () => {
               disabled={!scan}
               className="bg-purple-600 text-white px-5 py-2.5 rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 flex items-center gap-2"
             >
-              <Key className="w-4 h-4" /> Sync AD → RBAC
+              Sync AD → RBAC
             </button>
             <button
               onClick={handleRunScan}
@@ -662,42 +967,20 @@ const ADScanner = () => {
           CONNECTION FORM (shown when NOT connected)
           ────────────────────────────────────────── */}
       {!isConnected && (
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-            {/* Form Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-6 text-white">
-              <div className="flex items-center gap-3">
-                <Server className="w-8 h-8" />
-                <div>
-                  <h2 className="text-xl font-bold">Connect to Active Directory</h2>
-                  <p className="text-blue-100 text-sm mt-0.5">Enter your domain controller details to start scanning</p>
-                </div>
-              </div>
-            </div>
-
             {/* Form Body */}
-            <div className="p-8 space-y-5">
-              {/* Server IP + Port Row */}
-              <div className="grid grid-cols-3 gap-4">
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Server IP / Hostname</label>
-                  <input
-                    type="text"
-                    placeholder="192.168.1.10 or dc.mylab.local"
-                    value={connForm.server}
-                    onChange={e => setConnForm({ ...connForm, server: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Port</label>
-                  <input
-                    type="number"
-                    value={connForm.port}
-                    onChange={e => setConnForm({ ...connForm, port: parseInt(e.target.value) || 389 })}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                  />
-                </div>
+            <div className="p-6 space-y-4">
+              {/* Server Row */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Server IP / Hostname</label>
+                <input
+                  type="text"
+                  placeholder="192.168.1.10 or dc.mylab.local"
+                  value={connForm.server}
+                  onChange={e => setConnForm({ ...connForm, server: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
+                />
               </div>
 
               {/* Domain + Base DN Row */}
@@ -709,7 +992,7 @@ const ADScanner = () => {
                     placeholder="mylab.local"
                     value={connForm.domain}
                     onChange={e => setConnForm({ ...connForm, domain: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
                   />
                 </div>
                 <div>
@@ -719,63 +1002,66 @@ const ADScanner = () => {
                     placeholder="DC=mylab,DC=local"
                     value={connForm.base_dn}
                     onChange={e => setConnForm({ ...connForm, base_dn: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
                   />
                 </div>
               </div>
 
-              {/* Username */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bind Username</label>
-                <input
-                  type="text"
-                  placeholder="MYLAB\Administrator or CN=Admin,CN=Users,DC=mylab,DC=local"
-                  value={connForm.bind_user}
-                  onChange={e => setConnForm({ ...connForm, bind_user: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                />
-              </div>
-
-              {/* Password */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bind Password</label>
-                <div className="relative">
+              {/* Username + Password */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bind Username</label>
                   <input
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="Enter password"
-                    value={connForm.bind_password}
-                    onChange={e => setConnForm({ ...connForm, bind_password: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                    type="text"
+                    placeholder="MYLAB\Administrator or CN=Admin,CN=Users,DC=mylab,DC=local"
+                    value={connForm.bind_user}
+                    onChange={e => setConnForm({ ...connForm, bind_user: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bind Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Enter password"
+                      value={connForm.bind_password}
+                      onChange={e => setConnForm({ ...connForm, bind_password: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
               </div>
 
               {/* Encryption Mode */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Encryption</label>
-                <select
-                  value={connForm.use_ssl ? 'ldaps' : 'none'}
-                  onChange={e => {
-                    const v = e.target.value
-                    setConnForm({
-                      ...connForm,
-                      use_ssl: v === 'ldaps',
-                      use_start_tls: false,
-                      port: v === 'ldaps' ? 636 : 389,
-                    })
-                  }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                >
-                  <option value="none">None (plain LDAP, port 389)</option>
-                  <option value="ldaps">LDAPS / SSL (encrypted, port 636)</option>
-                </select>
+                <p className="text-sm font-semibold text-white">Encryption</p>
+                <div className="flex items-center gap-3 mt-2">
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={connForm.use_ssl}
+                      onChange={e => setConnForm({
+                        ...connForm,
+                        use_ssl: e.target.checked,
+                        use_start_tls: false,
+                        port: e.target.checked ? 636 : 389,
+                      })}
+                    />
+                    <div className="w-12 h-7 bg-[#3a3a3a] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-white rounded-full peer peer-checked:bg-blue-600 transition-colors"></div>
+                    <span className="absolute left-1 top-1 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></span>
+                  </label>
+                  <p className="text-sm text-gray-200">{connForm.use_ssl ? 'LDAPS / SSL (port 636)' : 'LDAP (no SSL, port 389)'}</p>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Port is auto-selected based on encryption: LDAP=389, LDAPS=636.</p>
                 {!connForm.use_ssl && (
                   <p className="text-xs text-amber-600 mt-1">⚠ Without encryption, password operations (create user, reset password) will fail.</p>
                 )}
@@ -848,37 +1134,37 @@ const ADScanner = () => {
           <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
               <p className="text-blue-200 text-sm font-medium mb-2">Total AD Users</p>
-              <p className="text-5xl leading-none font-bold text-[#63a8ff]">{scan.total_users}</p>
+              <p className="text-5xl leading-none font-bold text-blue-400">{scan.total_users}</p>
             </div>
-            <div className="bg-[#17315a] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
-              <Users className="w-7 h-7 text-[#63a8ff]" />
+            <div className="bg-[#1a3a5c] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <Users className="w-7 h-7 text-blue-400" />
             </div>
           </div>
           <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
               <p className="text-blue-200 text-sm font-medium mb-2">High Risk Accounts</p>
-              <p className="text-5xl leading-none font-bold text-[#ff5f5f]">{scan.high_risk_count}</p>
+              <p className="text-5xl leading-none font-bold text-red-500">{scan.high_risk_count}</p>
             </div>
-            <div className="bg-[#3f262c] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
-              <AlertTriangle className="w-7 h-7 text-[#ff5f5f]" />
+            <div className="bg-[#4a2c35] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <AlertTriangle className="w-7 h-7 text-red-500" />
             </div>
           </div>
           <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
               <p className="text-blue-200 text-sm font-medium mb-2">Privileged Accounts</p>
-              <p className="text-5xl leading-none font-bold text-[#ff962e]">{scan.privileged_users}</p>
+              <p className="text-5xl leading-none font-bold text-orange-400">{scan.privileged_users}</p>
             </div>
-            <div className="bg-[#3a2b24] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
-              <Shield className="w-7 h-7 text-[#ff962e]" />
+            <div className="bg-[#4a3a2a] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <Shield className="w-7 h-7 text-orange-400" />
             </div>
           </div>
           <div className="bg-white rounded-2xl border shadow-md p-6 flex items-start justify-between" style={{ borderColor: 'var(--app-border-color)' }}>
             <div>
               <p className="text-blue-200 text-sm font-medium mb-2">Stale Accounts</p>
-              <p className="text-5xl leading-none font-bold text-[#b4bfce]">{scan.stale_accounts}</p>
+              <p className="text-5xl leading-none font-bold text-gray-400">{scan.stale_accounts}</p>
             </div>
-            <div className="bg-[#353b46] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
-              <UserX className="w-7 h-7 text-[#b4bfce]" />
+            <div className="bg-[#3a4045] w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center">
+              <UserX className="w-7 h-7 text-gray-400" />
             </div>
           </div>
         </div>
@@ -924,7 +1210,7 @@ const ADScanner = () => {
             <h2 className="text-lg font-bold text-gray-800 mb-4">Last Scan Information</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div><span className="text-gray-500">Scan Time:</span><br /><strong>{formatScanTimestamp(scan.scan_timestamp)}</strong></div>
-              <div><span className="text-gray-500">Source:</span><br /><strong className="uppercase">{scan.scan_source}</strong></div>
+              <div><span className="text-gray-500">Source:</span><br /><strong className="uppercase">{scan.scan_source === 'ldap' && connection?.config?.use_ssl ? 'ldaps' : scan.scan_source}</strong></div>
               <div><span className="text-gray-500">Duration:</span><br /><strong>{scan.scan_duration_ms}ms</strong></div>
               <div><span className="text-gray-500">Enabled/Disabled:</span><br /><strong>{scan.enabled_users} / {scan.disabled_users}</strong></div>
             </div>
@@ -966,18 +1252,18 @@ const ADScanner = () => {
       {activeTab === 'users' && scan && (
         <div>
           {/* Filters */}
-          <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+          <div className="bg-[#1f1f1f] rounded-lg shadow-md p-4 mb-6">
             <div className="flex flex-col md:flex-row md:items-center gap-4">
               <div className="flex-1 relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
                   type="text" placeholder="Search by name, username, or email..."
                   value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full pl-10 pr-4 py-2.5 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white"
                 />
               </div>
               <select value={filterRisk} onChange={e => setFilterRisk(e.target.value)}
-                className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                className="px-4 py-2.5 border border-[#3a3a3a] rounded-lg bg-[#1f1f1f] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white">
                 <option value="All">All Risk Levels</option>
                 <option value="Critical">Critical</option>
                 <option value="High">High</option>
@@ -1009,7 +1295,9 @@ const ADScanner = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredUsers.map((user, idx) => (
+                {filteredUsers.map((user, idx) => {
+                  const protectedAccount = isSystemAccount(user.sam_account_name)
+                  return (
                   <React.Fragment key={idx}>
                     <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpandedUser(expandedUser === idx ? null : idx)}>
                       <td className="py-3 px-4">
@@ -1049,13 +1337,20 @@ const ADScanner = () => {
                         <span className="text-sm text-gray-600">{user.risk_flags?.length || 0} flags</span>
                       </td>
                       <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => openEditUser(user)} title="Edit user"
-                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => !protectedAccount && openPasswordReset(user)} title={protectedAccount ? 'System account password reset is blocked' : 'Reset password'}
+                            disabled={protectedAccount}
+                            className={`transition-colors ${protectedAccount ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:text-orange-600'}`}>
+                            <AlertCircle className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => !protectedAccount && openEditUser(user)} title={protectedAccount ? 'System account edit is blocked' : 'Edit user'}
+                            disabled={protectedAccount}
+                            className={`transition-colors ${protectedAccount ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:text-blue-600'}`}>
                             <Pencil className="w-4 h-4" />
                           </button>
-                          <button onClick={() => handleDeleteUser(user.sam_account_name)} title="Delete user"
-                            className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                          <button onClick={() => !protectedAccount && handleDeleteUser(user.sam_account_name)} title={protectedAccount ? 'System account delete is blocked' : 'Delete user'}
+                            disabled={protectedAccount}
+                            className={`transition-colors ${protectedAccount ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:text-red-700'}`}>
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
@@ -1130,7 +1425,8 @@ const ADScanner = () => {
                       </tr>
                     )}
                   </React.Fragment>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -1156,7 +1452,7 @@ const ADScanner = () => {
                     placeholder="Search groups by name or description..."
                     value={groupSearch}
                     onChange={e => setGroupSearch(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-10 pr-4 py-2.5 border border-[#3a3a3a] rounded-lg bg-[#1f1f1f] text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white"
                   />
                 </div>
                 <button onClick={() => { setCreateGroupForm({ name: '', scope: 'Global', group_type: 'Security', description: '', ou_dn: '' }); setShowCreateGroupModal(true) }}
@@ -1249,13 +1545,23 @@ const ADScanner = () => {
                               </span>
                             </td>
                             <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
-                              <div className="flex items-center gap-1">
-                                <button onClick={() => { setEditGroupCn(group.name); setEditGroupForm({ description: group.description || '' }); setShowEditGroupModal(true) }}
-                                  title="Edit group" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                              <div className="flex items-center gap-3">
+                                <button onClick={() => {
+                                  const normalizedScope = group.scope === 'Domain Local' ? 'DomainLocal' : (group.scope || 'Global')
+                                  setEditGroupCn(group.name)
+                                  setEditGroupForm({
+                                    name: group.name || '',
+                                    scope: normalizedScope,
+                                    group_type: group.type || 'Security',
+                                    description: group.description || '',
+                                  })
+                                  setShowEditGroupModal(true)
+                                }}
+                                  title="Edit group" className="text-gray-500 hover:text-blue-600 transition-colors">
                                   <Pencil className="w-4 h-4" />
                                 </button>
                                 <button onClick={() => handleDeleteGroup(group.name)}
-                                  title="Delete group" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                                  title="Delete group" className="text-red-500 hover:text-red-700 transition-colors">
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
@@ -1268,20 +1574,20 @@ const ADScanner = () => {
                           </tr>
                           {expandedGroup === idx && (
                             <tr>
-                              <td colSpan={7} className="bg-[#242632] border-t border-[#2b2d38] px-8 py-4">
-                                <p className="text-xs font-semibold text-[#9aa5ba] uppercase mb-3">Members ({group.members.length})</p>
+                              <td colSpan={7} className="bg-[#252525] border-t border-[#2a2a2a] px-8 py-4">
+                                <p className="text-xs font-semibold text-gray-400 uppercase mb-3">Members ({group.members.length})</p>
                                 {group.members.length > 0 ? (
                                   <div className="flex flex-wrap gap-2">
                                     {group.members.map((m, mi) => (
-                                      <span key={mi} className="px-3 py-1 text-xs font-medium bg-[#1e1f28] border border-[#3c4260] text-[#c9d7ff] rounded-full">
+                                      <span key={mi} className="px-3 py-1 text-xs font-medium bg-[#1f1f1f] border border-[#3a3a3a] text-gray-300 rounded-full">
                                         {m}
                                       </span>
                                     ))}
                                   </div>
                                 ) : (
-                                  <p className="text-sm text-[#8b96ad] italic">No members</p>
+                                  <p className="text-sm text-gray-400 italic">No members</p>
                                 )}
-                                <p className="text-xs text-[#8794ae] mt-3 font-mono truncate">{group.dn}</p>
+                                <p className="text-xs text-gray-400 mt-3 font-mono truncate">{group.dn}</p>
                               </td>
                             </tr>
                           )}
@@ -1310,7 +1616,7 @@ const ADScanner = () => {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input type="text" placeholder="Search OUs by name or path..."
                 value={ouSearch} onChange={e => setOuSearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white" />
             </div>
             <button onClick={() => { setOuForm({ name: '', description: '', parent_dn: '' }); setShowOuModal(true) }}
               className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-lg hover:bg-green-700 transition-colors">
@@ -1365,13 +1671,17 @@ const ADScanner = () => {
                         <td className="py-3 px-4 text-sm text-gray-600">{ou.managed_by || <span className="italic text-gray-300">None</span>}</td>
                         <td className="py-3 px-4 text-sm text-gray-500">{ou.created ? ou.created.replace('T', ' ') : '—'}</td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center gap-1">
-                            <button onClick={() => { setEditOuDn(ou.dn); setEditOuForm({ description: ou.description || '' }); setShowEditOuModal(true) }}
-                              title="Edit OU" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                          <div className="flex items-center gap-3">
+                            <button onClick={() => {
+                              setEditOuDn(ou.dn)
+                              setEditOuForm({ name: ou.name || '', description: ou.description || '' })
+                              setShowEditOuModal(true)
+                            }}
+                              title="Edit OU" className="text-gray-500 hover:text-blue-600 transition-colors">
                               <Pencil className="w-4 h-4" />
                             </button>
                             <button onClick={() => handleDeleteOu(ou.dn, ou.name)}
-                              title="Delete OU" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                              title="Delete OU" className="text-red-500 hover:text-red-700 transition-colors">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
@@ -1402,18 +1712,14 @@ const ADScanner = () => {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input type="text" placeholder="Search by name, hostname, or OS..."
                 value={computerSearch} onChange={e => setComputerSearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white" />
             </div>
             <select value={computerFilter} onChange={e => setComputerFilter(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              className="px-4 py-2.5 border border-[#3a3a3a] rounded-lg bg-[#1f1f1f] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white">
               <option value="All">All Status</option>
               <option value="Enabled">Enabled</option>
               <option value="Disabled">Disabled</option>
             </select>
-            <button onClick={() => { setComputerForm({ name: '', ou_dn: '', description: '' }); setShowComputerModal(true) }}
-              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2.5 rounded-lg hover:bg-green-700 transition-colors">
-              <Plus className="w-4 h-4" /> Add Computer
-            </button>
             <button onClick={fetchComputers} disabled={computersLoading}
               className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 transition-colors">
               <RefreshCw className={`w-4 h-4 ${computersLoading ? 'animate-spin' : ''}`} /> Refresh
@@ -1485,13 +1791,24 @@ const ADScanner = () => {
                         <td className="py-3 px-4 text-sm text-gray-600">{c.last_logon || 'Never'}</td>
                         <td className="py-3 px-4 text-sm text-gray-500">{c.description || <span className="italic text-gray-300">None</span>}</td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center gap-1">
-                            <button onClick={() => { setEditComputerCn(c.name); setEditComputerForm({ description: c.description || '', enabled: c.enabled }); setShowEditComputerModal(true) }}
-                              title="Edit computer" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                          <div className="flex items-center gap-3">
+                            <button onClick={() => {
+                              setEditComputerCn(c.name)
+                              setEditComputerForm({
+                                name: c.name || '',
+                                dns_hostname: c.dns_hostname || '',
+                                os: c.os || '',
+                                os_version: c.os_version || '',
+                                description: c.description || '',
+                                enabled: c.enabled,
+                              })
+                              setShowEditComputerModal(true)
+                            }}
+                              title="Edit computer" className="text-gray-500 hover:text-blue-600 transition-colors">
                               <Pencil className="w-4 h-4" />
                             </button>
                             <button onClick={() => handleDeleteComputer(c.name)}
-                              title="Delete computer" className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                              title="Delete computer" className="text-red-500 hover:text-red-700 transition-colors">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
@@ -1602,7 +1919,7 @@ const ADScanner = () => {
             <p className="text-sm text-gray-500 mb-4">Users who are members of high-privilege groups</p>
             <div className="space-y-3">
               {users.filter(u => u.is_privileged).map((user, idx) => (
-                <div key={idx} className="flex items-center justify-between bg-[#252833] border border-[#343847] rounded-lg p-4">
+                <div key={idx} className="flex items-center justify-between bg-[#252525] border border-[#3a3a3a] rounded-lg p-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center text-white font-semibold">
                       {user.display_name?.charAt(0)?.toUpperCase()}
@@ -1638,7 +1955,7 @@ const ADScanner = () => {
             <p className="text-sm text-gray-500 mb-4">Disabled accounts still in privileged groups</p>
             <div className="space-y-3">
               {users.filter(u => u.is_orphaned).map((user, idx) => (
-                <div key={idx} className="flex items-center justify-between bg-[#252833] border border-[#343847] rounded-lg p-4">
+                <div key={idx} className="flex items-center justify-between bg-[#252525] border border-[#3a3a3a] rounded-lg p-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-gray-400 rounded-full flex items-center justify-center text-white font-semibold">
                       {user.display_name?.charAt(0)?.toUpperCase()}
@@ -1702,14 +2019,14 @@ const ADScanner = () => {
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-lg font-bold text-gray-800 mb-4">Weak Configurations</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-[#252833] border border-[#343847] rounded-lg p-4">
+              <div className="bg-[#252525] border border-[#3a3a3a] rounded-lg p-4">
                 <div className="flex justify-between items-center">
                   <p className="font-semibold text-gray-800">Password Never Expires</p>
-                  <span className="text-2xl font-bold text-[#ff962e]">{scan.password_never_expires}</span>
+                  <span className="text-2xl font-bold text-orange-400">{scan.password_never_expires}</span>
                 </div>
                 <p className="text-sm text-gray-500 mt-1">Accounts with non-expiring passwords violate security best practices</p>
               </div>
-              <div className="bg-[#252833] border border-[#343847] rounded-lg p-4">
+              <div className="bg-[#252525] border border-[#3a3a3a] rounded-lg p-4">
                 <div className="flex justify-between items-center">
                   <p className="font-semibold text-gray-800">Blank Descriptions</p>
                   <span className="text-2xl font-bold text-[#e3b50a]">
@@ -1733,7 +2050,12 @@ const ADScanner = () => {
                 <p className="text-sm text-gray-500">Automatically assign RBAC roles based on AD group membership</p>
               </div>
               <button
-                onClick={() => { setEditingMapping(null); setMappingForm({ ad_group: '', rbac_role: '' }); setShowMappingModal(true) }}
+                onClick={() => {
+                  setEditingMapping(null)
+                  setMappingForm({ ad_group: '', rbac_role: '' })
+                  if (adGroups.length === 0 && !groupsLoading) fetchAdGroups()
+                  setShowMappingModal(true)
+                }}
                 className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 transition-colors"
               >
                 + Add Mapping
@@ -1756,11 +2078,28 @@ const ADScanner = () => {
                     <td className="py-3 px-4">
                       <span className="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">{m.rbac_role}</span>
                     </td>
-                    <td className="py-3 px-4 space-x-2">
-                      <button onClick={() => { setEditingMapping(m); setMappingForm({ ad_group: m.ad_group, rbac_role: m.rbac_role }); setShowMappingModal(true) }}
-                        className="text-blue-600 hover:text-blue-900 text-sm">Edit</button>
-                      <button onClick={() => handleDeleteMapping(m.id)}
-                        className="text-red-600 hover:text-red-900 text-sm">Delete</button>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => {
+                            setEditingMapping(m)
+                            setMappingForm({ ad_group: m.ad_group, rbac_role: m.rbac_role })
+                            if (adGroups.length === 0 && !groupsLoading) fetchAdGroups()
+                            setShowMappingModal(true)
+                          }}
+                          title="Edit mapping"
+                          className="text-gray-500 hover:text-blue-600 transition-colors"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMapping(m.id)}
+                          title="Delete mapping"
+                          className="text-red-500 hover:text-red-700 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1787,54 +2126,94 @@ const ADScanner = () => {
       {/* ═══ Create / Edit User Modal ═══ */}
       {showUserModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 overflow-hidden max-h-[90vh] flex flex-col">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
-              <h2 className="text-lg font-bold">{userModalMode === 'create' ? 'New User' : 'Edit User'}</h2>
+              <h2 className="text-lg font-bold">{userModalMode === 'create' ? 'New User' : 'Edit AD User'}</h2>
               <button onClick={() => setShowUserModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
-            <form onSubmit={handleSaveUser} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+            <form onSubmit={handleSaveUser} className="p-5 space-y-3 overflow-y-auto flex-1">
               {userModalMode === 'create' && (
                 <>
                   <div className="grid grid-cols-5 gap-3">
                     <div className="col-span-2">
                       <label className="block text-sm font-semibold text-gray-700 mb-1">First name *</label>
                       <input type="text" required value={userForm.first_name} onChange={e => setUserForm({...userForm, first_name: e.target.value})}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                     </div>
                     <div className="col-span-1">
                       <label className="block text-sm font-semibold text-gray-700 mb-1">Initials</label>
                       <input type="text" value={userForm.initials} onChange={e => setUserForm({...userForm, initials: e.target.value})}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                     </div>
                     <div className="col-span-2">
                       <label className="block text-sm font-semibold text-gray-700 mb-1">Last name</label>
                       <input type="text" value={userForm.last_name} onChange={e => setUserForm({...userForm, last_name: e.target.value})}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Full name</label>
                     <input type="text" value={userForm.full_name || `${userForm.first_name} ${userForm.last_name}`.trim()}
                       onChange={e => setUserForm({...userForm, full_name: e.target.value})}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name *</label>
-                      <input type="text" required value={userForm.sam_account_name} onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                      <input type="text" required value={userForm.user_logon_name} onChange={e => setUserForm({...userForm, user_logon_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">@domain</label>
-                      <input type="text" value={userForm.upn_suffix} onChange={e => setUserForm({...userForm, upn_suffix: e.target.value})}
-                        placeholder={connection?.config?.domain || 'mylab.local'}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                      <select
+                        value={userForm.upn_suffix}
+                        onChange={e => setUserForm({...userForm, upn_suffix: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                      >
+                        {resolvedUpnSuffixOptions.map((suffix) => (
+                          <option key={suffix} value={suffix}>@{suffix}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name (pre-Windows 2000) *</label>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <input
+                        type="text"
+                        value={preWindowsDomainPrefix}
+                        readOnly
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                      />
+                      <input
+                        type="text"
+                        required
+                        value={userForm.sam_account_name}
+                        onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
+                        className="w-full md:col-span-2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                      />
                     </div>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Password *</label>
-                    <input type="password" required value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                    <div className="relative">
+                      <input
+                        type={showAdUserPassword ? 'text' : 'password'}
+                        required
+                        value={userForm.password}
+                        onChange={e => setUserForm({...userForm, password: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-10 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAdUserPassword(v => !v)}
+                        className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700"
+                        aria-label={showAdUserPassword ? 'Hide password' : 'Show password'}
+                        title={showAdUserPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showAdUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                 </>
               )}
@@ -1844,34 +2223,161 @@ const ADScanner = () => {
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">First name</label>
                       <input type="text" value={userForm.first_name} onChange={e => setUserForm({...userForm, first_name: e.target.value})}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">Last name</label>
                       <input type="text" value={userForm.last_name} onChange={e => setUserForm({...userForm, last_name: e.target.value})}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Display name</label>
                     <input type="text" value={userForm.full_name} onChange={e => setUserForm({...userForm, full_name: e.target.value})}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name</label>
+                      <input type="text" value={userForm.user_logon_name} onChange={e => setUserForm({...userForm, user_logon_name: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">@domain</label>
+                      <select
+                        value={userForm.upn_suffix}
+                        onChange={e => setUserForm({...userForm, upn_suffix: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                      >
+                        {resolvedUpnSuffixOptions.map((suffix) => (
+                          <option key={suffix} value={suffix}>@{suffix}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name (pre-Windows 2000)</label>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <input
+                        type="text"
+                        value={preWindowsDomainPrefix}
+                        readOnly
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                      />
+                      <input
+                        type="text"
+                        value={userForm.sam_account_name}
+                        onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
+                        className="w-full md:col-span-2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                      />
+                    </div>
                   </div>
                 </>
               )}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <input type="text" value={userForm.description} onChange={e => setUserForm({...userForm, description: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+                <div className="text-sm font-semibold text-gray-700">Account options</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={userForm.user_must_change_password_next_logon}
+                      onChange={e => setUserForm({...userForm, user_must_change_password_next_logon: e.target.checked})}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-white"
+                    />
+                    <span className="text-sm font-medium text-gray-700">User must change password at next logon</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={userForm.user_cannot_change_password}
+                      onChange={e => setUserForm({...userForm, user_cannot_change_password: e.target.checked})}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-white"
+                    />
+                    <span className="text-sm font-medium text-gray-700">User cannot change password</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer md:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={userForm.password_never_expires}
+                      onChange={e => setUserForm({...userForm, password_never_expires: e.target.checked})}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-white"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Password never expires</span>
+                  </label>
+                </div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="text-sm font-semibold text-gray-700">Log on to</div>
+                  <div className="flex items-center gap-4 text-sm flex-wrap">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={userForm.logon_to_all_computers}
+                        onChange={() => setUserForm({...userForm, logon_to_all_computers: true})}
+                        className="text-blue-600 focus:ring-white"
+                      />
+                      <span className="text-gray-700">All computers</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={!userForm.logon_to_all_computers}
+                        onChange={() => setUserForm({...userForm, logon_to_all_computers: false})}
+                        className="text-blue-600 focus:ring-white"
+                      />
+                      <span className="text-gray-700">The following computers</span>
+                    </label>
+                  </div>
+                </div>
+                {!userForm.logon_to_all_computers && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-gray-500">Select one or more computers. These are stored in AD as workstation restrictions.</p>
+                    {computersLoading ? (
+                      <p className="text-sm text-gray-500">Loading computers...</p>
+                    ) : computers.length === 0 ? (
+                      <p className="text-sm text-gray-500">No computers available. Open the Computers tab and refresh first.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+                        {computers.map((computer) => {
+                          const computerName = computer.name.toUpperCase()
+                          const checked = userForm.logon_workstations.includes(computerName)
+                          return (
+                            <label key={computerName} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  setUserForm(prev => {
+                                    const selected = prev.logon_workstations.includes(computerName)
+                                      ? prev.logon_workstations.filter(item => item !== computerName)
+                                      : [...prev.logon_workstations, computerName]
+                                    return { ...prev, logon_workstations: selected }
+                                  })
+                                }}
+                                className="w-4 h-4 rounded text-blue-600 focus:ring-white"
+                              />
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium text-gray-700 truncate">{computer.name}</div>
+                                {computer.dns_hostname && <div className="text-xs text-gray-400 truncate">{computer.dns_hostname}</div>}
+                              </div>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-6">
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={userForm.enabled} onChange={e => setUserForm({...userForm, enabled: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                  <input type="checkbox" checked={userForm.enabled} onChange={e => setUserForm({...userForm, enabled: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-white" />
                   <span className="text-sm font-medium text-gray-700">Account Enabled</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={userForm.password_never_expires} onChange={e => setUserForm({...userForm, password_never_expires: e.target.checked})} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
-                  <span className="text-sm font-medium text-gray-700">Password never expires</span>
                 </label>
               </div>
               <div className="flex justify-end gap-3 pt-2">
@@ -1898,7 +2404,7 @@ const ADScanner = () => {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Select Group</label>
                 <select value={selectedGroupDn} onChange={e => setSelectedGroupDn(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none">
                   <option value="">-- Select a group --</option>
                   {(groupAssignAction === 'remove'
                     ? adGroups.filter(g => (groupAssignUser?.member_of || []).includes(g.name))
@@ -1933,7 +2439,7 @@ const ADScanner = () => {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Group name *</label>
                 <input type="text" required value={createGroupForm.name} onChange={e => setCreateGroupForm({...createGroupForm, name: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1943,7 +2449,7 @@ const ADScanner = () => {
                       <label key={s} className="flex items-center gap-2 cursor-pointer">
                         <input type="radio" name="scope" value={s} checked={createGroupForm.scope === s}
                           onChange={e => setCreateGroupForm({...createGroupForm, scope: e.target.value})}
-                          className="text-blue-600 focus:ring-blue-500" />
+                          className="text-blue-600 focus:ring-white" />
                         <span className="text-sm text-gray-700">{s === 'DomainLocal' ? 'Domain local' : s}</span>
                       </label>
                     ))}
@@ -1956,7 +2462,7 @@ const ADScanner = () => {
                       <label key={t} className="flex items-center gap-2 cursor-pointer">
                         <input type="radio" name="gtype" value={t} checked={createGroupForm.group_type === t}
                           onChange={e => setCreateGroupForm({...createGroupForm, group_type: e.target.value})}
-                          className="text-blue-600 focus:ring-blue-500" />
+                          className="text-blue-600 focus:ring-white" />
                         <span className="text-sm text-gray-700">{t}</span>
                       </label>
                     ))}
@@ -1966,7 +2472,7 @@ const ADScanner = () => {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <input type="text" value={createGroupForm.description} onChange={e => setCreateGroupForm({...createGroupForm, description: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowCreateGroupModal(false)}
@@ -1988,9 +2494,42 @@ const ADScanner = () => {
             </div>
             <form onSubmit={handleUpdateGroup} className="p-6 space-y-4">
               <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Group name *</label>
+                <input type="text" required value={editGroupForm.name} onChange={e => setEditGroupForm({...editGroupForm, name: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Group scope</label>
+                  <div className="space-y-1">
+                    {['DomainLocal', 'Global', 'Universal'].map(s => (
+                      <label key={s} className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="edit_scope" value={s} checked={editGroupForm.scope === s}
+                          onChange={e => setEditGroupForm({...editGroupForm, scope: e.target.value})}
+                          className="text-blue-600 focus:ring-white" />
+                        <span className="text-sm text-gray-700">{s === 'DomainLocal' ? 'Domain local' : s}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Group type</label>
+                  <div className="space-y-1">
+                    {['Security', 'Distribution'].map(t => (
+                      <label key={t} className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="edit_gtype" value={t} checked={editGroupForm.group_type === t}
+                          onChange={e => setEditGroupForm({...editGroupForm, group_type: e.target.value})}
+                          className="text-blue-600 focus:ring-white" />
+                        <span className="text-sm text-gray-700">{t}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <input type="text" value={editGroupForm.description} onChange={e => setEditGroupForm({...editGroupForm, description: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowEditGroupModal(false)}
@@ -2014,17 +2553,17 @@ const ADScanner = () => {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Name *</label>
                 <input type="text" required value={ouForm.name} onChange={e => setOuForm({...ouForm, name: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <input type="text" value={ouForm.description} onChange={e => setOuForm({...ouForm, description: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Parent OU (optional)</label>
                 <select value={ouForm.parent_dn} onChange={e => setOuForm({...ouForm, parent_dn: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none">
                   <option value="">Root (Domain)</option>
                   {ous.map((o, i) => (
                     <option key={i} value={o.dn}>{o.name} ({o.path})</option>
@@ -2051,9 +2590,14 @@ const ADScanner = () => {
             </div>
             <form onSubmit={handleUpdateOu} className="p-6 space-y-4">
               <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">OU Name *</label>
+                <input type="text" required value={editOuForm.name} onChange={e => setEditOuForm({...editOuForm, name: e.target.value})}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+              </div>
+              <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <input type="text" value={editOuForm.description} onChange={e => setEditOuForm({...editOuForm, description: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowEditOuModal(false)}
@@ -2077,12 +2621,12 @@ const ADScanner = () => {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Computer name *</label>
                 <input type="text" required value={computerForm.name} onChange={e => setComputerForm({...computerForm, name: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Target OU (optional)</label>
                 <select value={computerForm.ou_dn} onChange={e => setComputerForm({...computerForm, ou_dn: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none">
                   <option value="">Default (CN=Computers)</option>
                   {ous.map((o, i) => (
                     <option key={i} value={o.dn}>{o.name} ({o.path})</option>
@@ -2092,7 +2636,7 @@ const ADScanner = () => {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <input type="text" value={computerForm.description} onChange={e => setComputerForm({...computerForm, description: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowComputerModal(false)}
@@ -2116,12 +2660,12 @@ const ADScanner = () => {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <input type="text" value={editComputerForm.description} onChange={e => setEditComputerForm({...editComputerForm, description: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
               </div>
               <div>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={editComputerForm.enabled} onChange={e => setEditComputerForm({...editComputerForm, enabled: e.target.checked})}
-                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-white" />
                   <span className="text-sm font-medium text-gray-700">Enabled</span>
                 </label>
               </div>
@@ -2145,16 +2689,27 @@ const ADScanner = () => {
             <form onSubmit={handleSaveMapping}>
               <div className="mb-4">
                 <label className="block text-gray-700 text-sm font-bold mb-2">AD Group Name</label>
-                <input type="text" value={mappingForm.ad_group}
+                <select
+                  value={mappingForm.ad_group}
                   onChange={e => setMappingForm({ ...mappingForm, ad_group: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., Domain Admins, Web_Editors" required />
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
+                  required
+                  disabled={groupsLoading}
+                >
+                  <option value="">{groupsLoading ? 'Loading AD groups...' : '-- Select a group --'}</option>
+                  {!!mappingForm.ad_group && !adGroups.some(g => g.name === mappingForm.ad_group) && (
+                    <option value={mappingForm.ad_group}>{mappingForm.ad_group} (current)</option>
+                  )}
+                  {adGroups.map((g, i) => (
+                    <option key={g.dn || `${g.name}-${i}`} value={g.name}>{g.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="mb-6">
                 <label className="block text-gray-700 text-sm font-bold mb-2">RBAC Role</label>
                 <select value={mappingForm.rbac_role}
                   onChange={e => setMappingForm({ ...mappingForm, rbac_role: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white" required>
                   <option value="">Select a role...</option>
                   {roles.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
@@ -2165,6 +2720,77 @@ const ADScanner = () => {
                 <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                   {editingMapping ? 'Update' : 'Create'}
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Password Reset Modal ═══ */}
+      {showPasswordResetModal && passwordResetUser && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
+              <h2 className="text-lg font-bold">Reset AD User Password</h2>
+              <button onClick={() => setShowPasswordResetModal(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleResetPassword} className="p-6 space-y-4">
+              <p className="text-sm text-gray-700">
+                <strong>User:</strong> {passwordResetUser.display_name} ({passwordResetUser.sam_account_name})
+              </p>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">New Password *</label>
+                <div className="relative">
+                  <input 
+                    type={showResetPassword ? 'text' : 'password'}
+                    value={resetPasswordForm.new_password} 
+                    onChange={e => {
+                      setResetPasswordForm({...resetPasswordForm, new_password: e.target.value})
+                      if (resetPasswordError) setResetPasswordError('')
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-10 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                    placeholder="Enter new password"
+                    required 
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPassword(v => !v)}
+                    className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700"
+                    aria-label={showResetPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Must be 8+ characters with uppercase, lowercase, number, and special character
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Confirm Password *</label>
+                <input 
+                  type="password"
+                  value={resetPasswordForm.confirm_password} 
+                  onChange={e => {
+                    setResetPasswordForm({...resetPasswordForm, confirm_password: e.target.value})
+                    if (resetPasswordError) setResetPasswordError('')
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                  placeholder="Re-enter password"
+                  required 
+                />
+              </div>
+              {resetPasswordError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
+                  {resetPasswordError}
+                </div>
+              )}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800">
+                <strong>Note:</strong> Password reset requires a secure (SSL/TLS) AD connection. The user may need to log in with the new password at their next opportunity.
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowPasswordResetModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Reset Password</button>
               </div>
             </form>
           </div>

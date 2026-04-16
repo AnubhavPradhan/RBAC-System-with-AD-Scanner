@@ -99,7 +99,7 @@ The app opens at **http://localhost:5173**.
 | Reports | `view_reports` |
 | Audit Logs | `view_audit_logs` |
 | AD Scanner | `manage_ad_scanner` |
-| Settings | None (all users) |
+| Settings | `manage_settings` |
 
 ## 🧪 Test Scenarios
 
@@ -141,7 +141,6 @@ Copy `backend/.env.example` to `backend/.env` and configure:
 JWT_SECRET=change_me_in_production
 DATABASE_URL=sqlite:///./data/rbac.db
 AD_SERVER=ldaps://dc.example.com
-AD_USE_MOCK=True
 ```
 
 ## 🐛 Troubleshooting

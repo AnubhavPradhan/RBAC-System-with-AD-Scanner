@@ -1,5 +1,5 @@
 """
-Core AD scanner: tries real LDAP first, falls back to mock data.
+Core AD scanner for real LDAP/LDAPS directory scanning.
 """
 import json
 import time
@@ -10,8 +10,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from config import settings
-from database import ADScanResult, ADUser, AuditLog
-from ad_scanner.mock_ad import generate_mock_ad_users
+from database import ADScanResult, ADUser, AuditLog, ADConnectionConfig
 from ad_scanner.risk_engine import analyze_user_risk, generate_risk_summary
 
 logger = logging.getLogger(__name__)
@@ -209,6 +208,26 @@ def _try_ldap_scan(db: Session = None) -> Optional[list[dict]]:
         raise RuntimeError(f"LDAP connection/search failed: {e}")
 
 
+def _resolve_scan_source(db: Session) -> str:
+    """Resolve scan source label based on active connection security settings."""
+    use_ssl = bool(getattr(settings, "AD_USE_SSL", False))
+    ad_server = str(getattr(settings, "AD_SERVER", "") or "")
+    ad_port = int(getattr(settings, "AD_PORT", 389) or 389)
+
+    if ad_server.lower().startswith("ldaps://") or ad_port == 636:
+        use_ssl = True
+
+    if db is not None:
+        cfg = db.query(ADConnectionConfig).first()
+        if cfg and cfg.is_connected:
+            server = str(cfg.server or "")
+            use_ssl = bool(cfg.use_ssl)
+            if server.lower().startswith("ldaps://") or int(cfg.port or 389) == 636:
+                use_ssl = True
+
+    return "ldaps" if use_ssl else "ldap"
+
+
 def run_scan(db: Session, triggered_by: str = "system") -> dict:
     """
     Run a full AD scan:
@@ -220,7 +239,7 @@ def run_scan(db: Session, triggered_by: str = "system") -> dict:
     start = time.time()
 
     # ── Get AD users ──
-    source = "ldap"
+    source = _resolve_scan_source(db)
     raw_users = _try_ldap_scan(db=db)
     if raw_users is None:
         raise RuntimeError("LDAP scan failed. Check your AD connection settings.")
@@ -277,7 +296,7 @@ def run_scan(db: Session, triggered_by: str = "system") -> dict:
         user_email=triggered_by,
         action="AD Scan",
         resource="AD Scanner",
-        details=f"Scanned {summary['total_users']} AD users ({source}). "
+        details=f"Scanned {summary['total_users']} AD users ({source.upper()}). "
                 f"High risk: {summary['high_risk_count']}, Privileged: {summary['privileged_users']}",
         severity="Info",
     ))

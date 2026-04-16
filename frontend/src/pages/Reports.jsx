@@ -4,14 +4,64 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
 // ─── Export Helpers ────────────────────────────────────────────────────────────
-const exportToCSV = (data, filename) => {
+const toTitle = (value) => String(value || '')
+  .replace(/_/g, ' ')
+  .replace(/\b\w/g, (c) => c.toUpperCase())
+
+const formatNepalDateTime = (value) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kathmandu',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
+const formatCsvCell = (key, value) => {
+  if (value === null || value === undefined || value === '') return '-'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (Array.isArray(value)) return value.join(' | ')
+  if (/(timestamp|date|time|last_logon|created_at|updated_at)/i.test(key)) {
+    return formatNepalDateTime(value)
+  }
+  return String(value)
+}
+
+const exportToCSV = (data, filename, reportName = 'Report') => {
   if (!data || !data.length) return alert('No data to export')
   const headers = Object.keys(data[0])
-  const rows = data.map(row =>
-    headers.map(h => `"${String(row[h] ?? '').replace(/"/g, '""')}"`).join(',')
-  )
-  const csv = [headers.join(','), ...rows].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
+  const labelMap = {
+    sam_account_name: 'SAM Account',
+    display_name: 'Display Name',
+    user_email: 'User Email',
+    risk_flags: 'Risk Flags',
+    role_count: 'Roles Using Permission',
+    user_count: 'Assigned Users',
+  }
+
+  const csvRows = []
+  csvRows.push([`Report: ${reportName}`])
+  csvRows.push([`Generated (NPT): ${formatNepalDateTime(new Date().toISOString())}`])
+  csvRows.push([`Total Records: ${data.length}`])
+  csvRows.push([])
+  csvRows.push(headers.map((h) => labelMap[h] || toTitle(h)))
+
+  for (const row of data) {
+    csvRows.push(headers.map((key) => formatCsvCell(key, row[key])))
+  }
+
+  const csv = csvRows
+    .map((cols) => cols.map((col) => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n')
+
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = filename; a.click()
@@ -104,7 +154,7 @@ const Reports = () => {
 
   const handleExportCSV = () => {
     if (!selectedReport || !reportData.length) return alert('Generate a report first')
-    exportToCSV(reportData, `${selectedReport.id}-report.csv`)
+    exportToCSV(reportData, `${selectedReport.id}-report.csv`, selectedReport.name)
   }
 
   const handleExportJSON = () => {
@@ -154,29 +204,29 @@ const Reports = () => {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-blue-100 mb-8">Reports</h1>
+      <h1 className="text-3xl font-bold text-white mb-8">Reports</h1>
 
       {/* Filters + Report Types */}
-      <div className="bg-white rounded-lg shadow-md mb-8">
-        <div className="p-6 border-b border-gray-100">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">Report Filters</h2>
+      <div className="bg-[#1f1f1f] rounded-lg shadow-md mb-8">
+        <div className="p-6 border-b border-[#3a3a3a]">
+          <h2 className="text-xl font-semibold text-white mb-4">Report Filters</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Start Date</label>
               <input
                 type="date"
                 value={dateRange.start}
                 onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">End Date</label>
               <input
                 type="date"
                 value={dateRange.end}
                 onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-[#3a3a3a] rounded-lg bg-[#323232] text-[#9c9c9c] focus:outline-none focus:ring-2 focus:ring-white"
               />
             </div>
             <div className="flex items-end gap-2">

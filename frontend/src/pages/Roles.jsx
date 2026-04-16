@@ -1,6 +1,19 @@
-import React, { useState, useEffect } from 'react'
-import { Pencil, Trash2 } from 'lucide-react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { Pencil, Trash2, GripVertical } from 'lucide-react'
 import api from '../utils/api'
+
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const ROLE_ORDER_STORAGE_KEY = 'roles-card-order'
+const DEPRECATED_PERMISSIONS = new Set(['manage_permissions', 'view_analytics'])
+
+const isVisiblePermission = (permission = '') => !DEPRECATED_PERMISSIONS.has(permission)
+
+const formatPermissionLabel = (name = '') =>
+  name
+    .split('_')
+    .filter(Boolean)
+    .map((part) => (part.toLowerCase() === 'ad' ? 'AD' : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(' ')
 
 const Roles = () => {
   const [showModal, setShowModal] = useState(false)
@@ -10,11 +23,18 @@ const Roles = () => {
   const [loading, setLoading] = useState(true)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [roleToDelete, setRoleToDelete] = useState(null)
+  const [roleOrder, setRoleOrder] = useState([])
+  const [draggedRoleId, setDraggedRoleId] = useState(null)
+  const [orderHydrated, setOrderHydrated] = useState(false)
 
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    permissions: []
+    permissions: [],
+    time_restricted: false,
+    allowed_days: [...DAYS],
+    access_start_time: '09:00',
+    access_end_time: '18:00'
   })
 
   useEffect(() => {
@@ -22,10 +42,46 @@ const Roles = () => {
     fetchPermissions()
   }, [])
 
+  useEffect(() => {
+    if (!showModal && !showDeleteConfirm) return
+
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      if (showDeleteConfirm) {
+        setShowDeleteConfirm(false)
+        setRoleToDelete(null)
+        return
+      }
+      if (showModal) {
+        setShowModal(false)
+        setEditingRole(null)
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [showModal, showDeleteConfirm])
+
   const fetchRoles = async () => {
     try {
       const { data } = await api.get('/roles')
       setRoles(data)
+
+      const fetchedIds = data.map(r => String(r.id))
+      const savedOrder = (() => {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(ROLE_ORDER_STORAGE_KEY) || '[]')
+          return Array.isArray(parsed) ? parsed.map(id => String(id)) : []
+        } catch {
+          return []
+        }
+      })()
+
+      const filteredSaved = savedOrder.filter(id => fetchedIds.includes(id))
+      const missingIds = fetchedIds.filter(id => !filteredSaved.includes(id))
+      setRoleOrder([...filteredSaved, ...missingIds])
+      setOrderHydrated(true)
     } catch (err) {
       console.error('Failed to fetch roles:', err)
     } finally {
@@ -33,10 +89,19 @@ const Roles = () => {
     }
   }
 
+  useEffect(() => {
+    if (!orderHydrated) return
+    localStorage.setItem(ROLE_ORDER_STORAGE_KEY, JSON.stringify(roleOrder))
+  }, [roleOrder, orderHydrated])
+
   const fetchPermissions = async () => {
     try {
       const { data } = await api.get('/permissions')
-      setAvailablePermissions(data.map(p => p.name))
+      setAvailablePermissions(
+        data
+          .map(p => p.name)
+          .filter(isVisiblePermission)
+      )
     } catch (err) {
       console.error('Failed to fetch permissions:', err)
     }
@@ -52,15 +117,29 @@ const Roles = () => {
 
   const handleSubmitRole = async (e) => {
     e.preventDefault()
+    const payload = {
+      ...formData,
+      permissions: formData.permissions.filter(isVisiblePermission)
+    }
+
     try {
       if (editingRole) {
-        const { data } = await api.put(`/roles/${editingRole.id}`, formData)
+        const { data } = await api.put(`/roles/${editingRole.id}`, payload)
         setRoles(roles.map(r => r.id === editingRole.id ? data : r))
       } else {
-        const { data } = await api.post('/roles', formData)
+        const { data } = await api.post('/roles', payload)
         setRoles([...roles, data])
+        setRoleOrder(prev => [...prev, String(data.id)])
       }
-      setFormData({ name: '', description: '', permissions: [] })
+      setFormData({
+        name: '',
+        description: '',
+        permissions: [],
+        time_restricted: false,
+        allowed_days: [...DAYS],
+        access_start_time: '09:00',
+        access_end_time: '18:00'
+      })
       setEditingRole(null)
       setShowModal(false)
     } catch (err) {
@@ -73,15 +152,35 @@ const Roles = () => {
     setFormData({
       name: role.name,
       description: role.description,
-      permissions: [...(role.permissions || [])]
+      permissions: [...(role.permissions || [])].filter(isVisiblePermission),
+      time_restricted: !!role.time_restricted,
+      allowed_days: Array.isArray(role.allowed_days) && role.allowed_days.length > 0 ? [...role.allowed_days] : [...DAYS],
+      access_start_time: role.access_start_time || '09:00',
+      access_end_time: role.access_end_time || '18:00'
     })
     setShowModal(true)
   }
 
   const handleAddNew = () => {
     setEditingRole(null)
-    setFormData({ name: '', description: '', permissions: [] })
+    setFormData({
+      name: '',
+      description: '',
+      permissions: [],
+      time_restricted: false,
+      allowed_days: [...DAYS],
+      access_start_time: '09:00',
+      access_end_time: '18:00'
+    })
     setShowModal(true)
+  }
+
+  const toggleAllowedDay = (day) => {
+    if (formData.allowed_days.includes(day)) {
+      setFormData({ ...formData, allowed_days: formData.allowed_days.filter(d => d !== day) })
+    } else {
+      setFormData({ ...formData, allowed_days: [...formData.allowed_days, day] })
+    }
   }
 
   const handleDeleteRole = (role) => {
@@ -94,6 +193,7 @@ const Roles = () => {
     try {
       await api.delete(`/roles/${roleToDelete.id}`)
       setRoles(roles.filter(r => r.id !== roleToDelete.id))
+      setRoleOrder(prev => prev.filter(id => id !== String(roleToDelete.id)))
       setShowDeleteConfirm(false)
       setRoleToDelete(null)
     } catch (err) {
@@ -101,10 +201,44 @@ const Roles = () => {
     }
   }
 
+  const orderedRoles = useMemo(() => {
+    if (roleOrder.length === 0) return roles
+    const roleMap = new Map(roles.map(role => [String(role.id), role]))
+    const ordered = roleOrder.map(id => roleMap.get(id)).filter(Boolean)
+    const leftovers = roles.filter(role => !roleOrder.includes(String(role.id)))
+    return [...ordered, ...leftovers]
+  }, [roles, roleOrder])
+
+  const handleRoleDragStart = (event, roleId) => {
+    const normalizedId = String(roleId)
+    setDraggedRoleId(normalizedId)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', normalizedId)
+  }
+
+  const handleRoleDrop = (targetRoleId) => {
+    const normalizedTargetId = String(targetRoleId)
+    if (!draggedRoleId || draggedRoleId === normalizedTargetId) {
+      setDraggedRoleId(null)
+      return
+    }
+
+    setRoleOrder(prev => {
+      const next = prev.length ? [...prev] : roles.map(r => String(r.id))
+      const fromIdx = next.indexOf(draggedRoleId)
+      const toIdx = next.indexOf(normalizedTargetId)
+      if (fromIdx === -1 || toIdx === -1) return next
+      next.splice(fromIdx, 1)
+      next.splice(toIdx, 0, draggedRoleId)
+      return next
+    })
+    setDraggedRoleId(null)
+  }
+
   return (
     <div>
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-blue-100">Roles Management</h1>
+        <h1 className="text-3xl font-bold text-white">Roles Management</h1>
         <button
           onClick={handleAddNew}
           className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
@@ -115,14 +249,29 @@ const Roles = () => {
 
       {/* Roles Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {roles.map((role) => (
-          <div key={role.id} className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow">
+        {orderedRoles.map((role) => (
+          <div
+            key={role.id}
+            draggable
+            onDragStart={(e) => handleRoleDragStart(e, role.id)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => handleRoleDrop(role.id)}
+            onDragEnd={() => setDraggedRoleId(null)}
+            className={`bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow ${draggedRoleId === role.id ? 'opacity-70' : ''}`}
+          >
             <div className="flex justify-between items-start mb-4">
               <div>
                 <h3 className="text-xl font-bold text-gray-800 mb-1">{role.name}</h3>
                 <p className="text-gray-500 text-sm">{role.description}</p>
               </div>
               <div className="flex space-x-2">
+                <button
+                  type="button"
+                  className="text-gray-400 hover:text-gray-600 transition-colors cursor-grab active:cursor-grabbing"
+                  title="Alignment handle: drag card to reorder"
+                >
+                  <GripVertical className="w-4 h-4" />
+                </button>
                 <button 
                   onClick={() => handleEditRole(role)}
                   className="text-gray-500 hover:text-blue-600 transition-colors"
@@ -143,12 +292,12 @@ const Roles = () => {
             <div className="mb-4">
               <h4 className="text-sm font-semibold text-gray-700 mb-2">Permissions:</h4>
               <div className="flex flex-wrap gap-2">
-                {role.permissions.map((permission, index) => (
+                {(role.permissions || []).filter(isVisiblePermission).map((permission, index) => (
                   <span
                     key={index}
                     className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full"
                   >
-                    {permission}
+                    {formatPermissionLabel(permission)}
                   </span>
                 ))}
               </div>
@@ -158,6 +307,11 @@ const Roles = () => {
               <p className="text-sm text-gray-600">
                 <span className="font-semibold">{role.users}</span> users assigned
               </p>
+              <p className="text-xs text-gray-500 mt-2">
+                {role.time_restricted
+                  ? `NPT Access: ${(role.allowed_days || []).join(', ')} ${role.access_start_time}-${role.access_end_time}`
+                  : 'NPT Access: No time restriction'}
+              </p>
             </div>
           </div>
         ))}
@@ -165,8 +319,8 @@ const Roles = () => {
 
       {/* Add Role Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-8 max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-8 w-[min(94vw,860px)] max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold mb-6 text-gray-800">
               {editingRole ? 'Edit Role' : 'Add New Role'}
             </h2>
@@ -177,7 +331,7 @@ const Roles = () => {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                   required
                 />
               </div>
@@ -186,7 +340,7 @@ const Roles = () => {
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
                   rows="3"
                   required
                 />
@@ -200,13 +354,68 @@ const Roles = () => {
                         type="checkbox"
                         checked={formData.permissions.includes(permission)}
                         onChange={() => handlePermissionToggle(permission)}
-                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-white"
                       />
-                      <span className="ml-2 text-gray-700">{permission}</span>
+                      <span className="ml-2 text-gray-700">{formatPermissionLabel(permission)}</span>
                     </label>
                   ))}
                 </div>
               </div>
+              <div className="mb-4 rounded-lg border border-gray-200 p-3 bg-gray-50">
+                <p className="text-xs font-semibold text-gray-700">Timezone</p>
+                <p className="text-sm text-gray-600">Asia/Kathmandu (Nepal Time)</p>
+              </div>
+              <div className="mb-4">
+                <label className="flex items-center gap-2 text-gray-700 text-sm font-bold mb-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.time_restricted}
+                    onChange={(e) => setFormData({ ...formData, time_restricted: e.target.checked })}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-white"
+                  />
+                  Enable time-based access policy
+                </label>
+              </div>
+              {formData.time_restricted && (
+                <>
+                  <div className="mb-4">
+                    <label className="block text-gray-700 text-sm font-bold mb-2">Allowed Days (NPT)</label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {DAYS.map((day) => (
+                        <label key={day} className="flex items-center text-sm text-gray-700 gap-1">
+                          <input
+                            type="checkbox"
+                            checked={formData.allowed_days.includes(day)}
+                            onChange={() => toggleAllowedDay(day)}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-white"
+                          />
+                          {day}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mb-6 grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-gray-700 text-sm font-bold mb-2">Start Time (NPT)</label>
+                      <input
+                        type="time"
+                        value={formData.access_start_time}
+                        onChange={(e) => setFormData({ ...formData, access_start_time: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-gray-700 text-sm font-bold mb-2">End Time (NPT)</label>
+                      <input
+                        type="time"
+                        value={formData.access_end_time}
+                        onChange={(e) => setFormData({ ...formData, access_end_time: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-white"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
               <div className="flex justify-end space-x-3">
                 <button
                   type="button"
