@@ -131,6 +131,7 @@ const ADScanner = () => {
   const [showUserModal, setShowUserModal] = useState(false)
   const [userModalMode, setUserModalMode] = useState('create')
   const [userForm, setUserForm] = useState(createDefaultAdUserForm())
+  const [upnSuffixOptions, setUpnSuffixOptions] = useState([])
   const [editingUserSam, setEditingUserSam] = useState(null)
   const [showGroupAssignModal, setShowGroupAssignModal] = useState(false)
   const [groupAssignUser, setGroupAssignUser] = useState(null)
@@ -168,6 +169,23 @@ const ADScanner = () => {
   const [resetPasswordForm, setResetPasswordForm] = useState({ new_password: '', confirm_password: '' })
   const [showResetPassword, setShowResetPassword] = useState(false)
   const [resetPasswordError, setResetPasswordError] = useState('')
+
+  const preWindowsDomainPrefix = `${(connection?.config?.domain || 'mylab').split('.')[0].toUpperCase()}\\`
+  const resolvedUpnSuffixOptions = upnSuffixOptions.length > 0
+    ? upnSuffixOptions
+    : [connection?.config?.domain || 'mylab.local']
+
+  const normalizeUpnSuffixes = useCallback((values = [], fallback = '') => {
+    const unique = new Set()
+    values.forEach((value) => {
+      const cleaned = String(value || '').trim().toLowerCase()
+      if (cleaned) unique.add(cleaned)
+    })
+    const fallbackCleaned = String(fallback || '').trim().toLowerCase()
+    if (fallbackCleaned) unique.add(fallbackCleaned)
+    if (unique.size === 0) unique.add('mylab.local')
+    return Array.from(unique).sort((a, b) => a.localeCompare(b))
+  }, [])
 
   useEffect(() => {
     const hasOpenBox = Boolean(
@@ -274,6 +292,7 @@ const ADScanner = () => {
     try {
       const { data } = await api.get('/ad-scanner/connection')
       setConnection(data)
+      const connectionDomain = data?.config?.domain || ''
       if (data.config) {
         setConnForm(prev => ({
           ...prev,
@@ -286,9 +305,26 @@ const ADScanner = () => {
           domain: data.config.domain || '',
         }))
       }
+      await fetchUpnSuffixes(connectionDomain)
     } catch (err) { console.error('Connection status check failed:', err) }
     finally { setConnectionLoading(false) }
   }
+
+  const fetchUpnSuffixes = useCallback(async (fallbackDomain = '') => {
+    try {
+      const { data } = await api.get('/ad-scanner/upn-suffixes')
+      const options = normalizeUpnSuffixes(
+        data?.suffixes || [],
+        data?.default_suffix || fallbackDomain || connection?.config?.domain || ''
+      )
+      setUpnSuffixOptions(options)
+      return options
+    } catch (err) {
+      const options = normalizeUpnSuffixes([], fallbackDomain || connection?.config?.domain || '')
+      setUpnSuffixOptions(options)
+      return options
+    }
+  }, [connection?.config?.domain, normalizeUpnSuffixes])
 
   const handleTestConnection = async () => {
     setTesting(true)
@@ -317,6 +353,7 @@ const ADScanner = () => {
       const { data } = await api.post('/ad-scanner/connect', payload)
       if (data.success) {
         setConnection({ connected: true, config: payload })
+        await fetchUpnSuffixes(payload.domain || '')
         setTestResult({ success: true, message: data.message })
       } else {
         setTestResult({ success: false, message: data.message })
@@ -333,6 +370,7 @@ const ADScanner = () => {
     try {
       await api.post('/ad-scanner/disconnect')
       setConnection({ connected: false, config: null })
+      setUpnSuffixOptions(['mylab.local'])
       setConnForm({ server: '', port: 389, use_ssl: false, use_start_tls: false, base_dn: '', bind_user: '', bind_password: '', domain: '' })
       setTestResult(null)
     } catch (err) { showNotification('error', 'Failed to disconnect') }
@@ -453,7 +491,8 @@ const ADScanner = () => {
   // ── User CRUD ──
   const openCreateUser = () => {
     setUserModalMode('create')
-    setUserForm(createDefaultAdUserForm(connection?.config?.domain || ''))
+    const defaultSuffix = resolvedUpnSuffixOptions[0] || connection?.config?.domain || ''
+    setUserForm(createDefaultAdUserForm(defaultSuffix))
     setShowAdUserPassword(false)
     setShowUserModal(true)
     if (computers.length === 0 && !computersLoading) fetchComputers()
@@ -466,6 +505,8 @@ const ADScanner = () => {
     }
     setUserModalMode('edit')
     setEditingUserSam(user.sam_account_name)
+    const initialSuffix = user.upn_suffix || connection?.config?.domain || ''
+    setUpnSuffixOptions(prev => normalizeUpnSuffixes(prev, initialSuffix))
     setUserForm({
       first_name: user.display_name?.split(' ')[0] || '',
       last_name: user.display_name?.split(' ').slice(1).join(' ') || '',
@@ -490,6 +531,7 @@ const ADScanner = () => {
 
     try {
       const { data } = await api.get(`/ad-scanner/users/${user.sam_account_name}`)
+      setUpnSuffixOptions(prev => normalizeUpnSuffixes(prev, data.upn_suffix || connection?.config?.domain || ''))
       setUserForm(prev => ({
         ...prev,
         first_name: data.first_name || prev.first_name,
@@ -2123,15 +2165,34 @@ const ADScanner = () => {
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">@domain</label>
-                      <input type="text" value={userForm.upn_suffix} onChange={e => setUserForm({...userForm, upn_suffix: e.target.value})}
-                        placeholder={connection?.config?.domain || 'mylab.local'}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                      <select
+                        value={userForm.upn_suffix}
+                        onChange={e => setUserForm({...userForm, upn_suffix: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                      >
+                        {resolvedUpnSuffixOptions.map((suffix) => (
+                          <option key={suffix} value={suffix}>@{suffix}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name (pre-Windows 2000) *</label>
-                    <input type="text" required value={userForm.sam_account_name} onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <input
+                        type="text"
+                        value={preWindowsDomainPrefix}
+                        readOnly
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                      />
+                      <input
+                        type="text"
+                        required
+                        value={userForm.sam_account_name}
+                        onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
+                        className="w-full md:col-span-2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                      />
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Password *</label>
@@ -2182,16 +2243,34 @@ const ADScanner = () => {
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name (pre-Windows 2000)</label>
-                      <input type="text" value={userForm.sam_account_name} onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">@domain</label>
+                      <select
+                        value={userForm.upn_suffix}
+                        onChange={e => setUserForm({...userForm, upn_suffix: e.target.value})}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                      >
+                        {resolvedUpnSuffixOptions.map((suffix) => (
+                          <option key={suffix} value={suffix}>@{suffix}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">@domain</label>
-                    <input type="text" value={userForm.upn_suffix} onChange={e => setUserForm({...userForm, upn_suffix: e.target.value})}
-                      placeholder={connection?.config?.domain || 'mylab.local'}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none" />
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">User logon name (pre-Windows 2000)</label>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <input
+                        type="text"
+                        value={preWindowsDomainPrefix}
+                        readOnly
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-600 cursor-not-allowed"
+                      />
+                      <input
+                        type="text"
+                        value={userForm.sam_account_name}
+                        onChange={e => setUserForm({...userForm, sam_account_name: e.target.value})}
+                        className="w-full md:col-span-2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                      />
+                    </div>
                   </div>
                 </>
               )}

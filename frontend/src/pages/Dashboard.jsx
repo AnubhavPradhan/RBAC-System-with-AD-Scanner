@@ -48,6 +48,7 @@ const SURFACE_STYLE = {
 const Dashboard = () => {
   const { currentUser, hasPermission } = useAuth()
   const canManageAdScanner = hasPermission('manage_ad_scanner')
+  const canViewAuditLogs = hasPermission('view_audit_logs')
   const [stats, setStats] = useState(
     STAT_META.map(m => ({ ...m, value: '0' }))
   )
@@ -82,14 +83,18 @@ const Dashboard = () => {
       try {
         const { data } = await api.get('/audit-logs?action=All')
 
-        // Recent activity list (last 5)
-        setRecentActivity(
-          data.slice(0, 5).map(log => ({
-            user: log.user_email,
-            action: `${log.action} – ${log.details}`,
-            time: log.timestamp
-          }))
-        )
+        if (canViewAuditLogs) {
+          // Recent activity list (last 5)
+          setRecentActivity(
+            data.slice(0, 5).map(log => ({
+              user: log.user_email,
+              action: `${log.action} – ${log.details}`,
+              time: log.timestamp
+            }))
+          )
+        } else {
+          setRecentActivity([])
+        }
 
         // Weekly activity — group by JS day (0=Sun…6=Sat), remap to Mon-Sun
         const counts = { Logins: Array(7).fill(0), Actions: Array(7).fill(0) }
@@ -153,7 +158,7 @@ const Dashboard = () => {
     } else {
       setAdStatus({ loading: false, configured: false, connected: false, message: '' })
     }
-  }, [canManageAdScanner])
+  }, [canManageAdScanner, canViewAuditLogs])
 
   const renderPieLabel = ({ cx, cy, midAngle, outerRadius, index }) => {
     const RADIAN = Math.PI / 180
@@ -264,30 +269,31 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Recent Activity */}
-      <div className="rounded-2xl border shadow-md p-6" style={SURFACE_STYLE}>
-        <h2 className="text-xl font-bold text-white mb-4">Recent Activity</h2>
-        <div className="space-y-4">
-          {recentActivity.length > 0 ? (
-            recentActivity.map((activity, index) => (
-              <div key={index} className="flex items-center justify-between border-b border-blue-900/50 pb-3 last:border-0">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-blue-900/60 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-                    {activity.user.charAt(0).toUpperCase()}
+      {canViewAuditLogs && (
+        <div className="rounded-2xl border shadow-md p-6" style={SURFACE_STYLE}>
+          <h2 className="text-xl font-bold text-white mb-4">Recent Activity</h2>
+          <div className="space-y-4">
+            {recentActivity.length > 0 ? (
+              recentActivity.map((activity, index) => (
+                <div key={index} className="flex items-center justify-between border-b border-blue-900/50 pb-3 last:border-0">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-blue-900/60 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                      {activity.user.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="text-white font-medium">{activity.user}</p>
+                      <p className="text-white text-sm">{normalizeActivitySource(activity.action)}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-white font-medium">{activity.user}</p>
-                    <p className="text-white text-sm">{normalizeActivitySource(activity.action)}</p>
-                  </div>
+                  <span className="text-white text-sm">{activity.time}</span>
                 </div>
-                <span className="text-white text-sm">{activity.time}</span>
-              </div>
-            ))
-          ) : (
-            <p className="text-white text-center py-8">No recent activity yet</p>
-          )}
+              ))
+            ) : (
+              <p className="text-white text-center py-8">No recent activity yet</p>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
