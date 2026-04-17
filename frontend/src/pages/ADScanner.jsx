@@ -162,6 +162,7 @@ const ADScanner = () => {
   const [passwordResetUser, setPasswordResetUser] = useState(null)
   const [resetPasswordForm, setResetPasswordForm] = useState({ new_password: '', confirm_password: '' })
   const [showResetPassword, setShowResetPassword] = useState(false)
+  const [showConfirmResetPassword, setShowConfirmResetPassword] = useState(false)
   const [resetPasswordError, setResetPasswordError] = useState('')
 
   const preWindowsDomainPrefix = `${(connection?.config?.domain || 'mylab').split('.')[0].toUpperCase()}\\`
@@ -559,6 +560,7 @@ const ADScanner = () => {
     setPasswordResetUser(user)
     setResetPasswordForm({ new_password: '', confirm_password: '' })
     setShowResetPassword(false)
+    setShowConfirmResetPassword(false)
     setResetPasswordError('')
     setShowPasswordResetModal(true)
   }
@@ -2562,17 +2564,27 @@ const ADScanner = () => {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Confirm Password *</label>
-                <input 
-                  type="password"
-                  value={resetPasswordForm.confirm_password} 
-                  onChange={e => {
-                    setResetPasswordForm({...resetPasswordForm, confirm_password: e.target.value})
-                    if (resetPasswordError) setResetPasswordError('')
-                  }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
-                  placeholder="Re-enter password"
-                  required 
-                />
+                <div className="relative">
+                  <input 
+                    type={showConfirmResetPassword ? 'text' : 'password'}
+                    value={resetPasswordForm.confirm_password} 
+                    onChange={e => {
+                      setResetPasswordForm({...resetPasswordForm, confirm_password: e.target.value})
+                      if (resetPasswordError) setResetPasswordError('')
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-10 text-sm focus:ring-2 focus:ring-white focus:border-white outline-none"
+                    placeholder="Re-enter password"
+                    required 
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmResetPassword(v => !v)}
+                    className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700"
+                    aria-label={showConfirmResetPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showConfirmResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
               {resetPasswordError && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
