@@ -1384,6 +1384,14 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
     conn, cfg = _get_ldap_conn(db)
     try:
         from ldap3 import MODIFY_REPLACE, MODIFY_DELETE
+
+        # AD rejects unicodePwd operations over plain LDAP.
+        if not (cfg.use_ssl or cfg.use_start_tls):
+            raise HTTPException(
+                400,
+                "User creation requires an encrypted AD connection. Enable StartTLS (recommended) or LDAPS and reconnect.",
+            )
+
         upn_name, pre_windows_name = _get_user_identity_values(body)
         display = body.full_name or f"{body.first_name} {body.last_name}".strip() or body.sam_account_name
         container = body.ou_dn if body.ou_dn else f"CN=Users,{cfg.base_dn}"
@@ -1397,7 +1405,9 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
             "userPrincipalName": f"{upn_name}@{upn_suffix}",
             "displayName": display,
             "givenName": body.first_name,
-            "userAccountControl": 512,  # normal account; other flags set below
+            # Create as disabled first, then set password, then set final UAC.
+            # This avoids common AD "unwillingToPerform" errors during add.
+            "userAccountControl": 514,
         }
         if body.last_name:
             attrs["sn"] = body.last_name
@@ -1408,7 +1418,13 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
 
         ok = conn.add(user_dn, attributes=attrs)
         if not ok:
-            raise HTTPException(400, f"Failed to create user: {conn.result.get('description', conn.result)}")
+            add_err = str(conn.result.get('description', conn.result))
+            if add_err.lower() == "unwillingtoperform":
+                raise HTTPException(
+                    400,
+                    "Failed to create user: AD returned unwillingToPerform. Check OU permissions for the bind account and confirm required attributes (name fields) are valid.",
+                )
+            raise HTTPException(400, f"Failed to create user: {add_err}")
 
         # Set password (requires LDAPS or StartTLS — AD rejects unicodePwd over plain LDAP)
         pwd_quoted = f'"{body.password}"'
@@ -1418,10 +1434,9 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
             pwd_err = conn.result.get('description', conn.result)
             # Clean up the user so we don't leave an account with no password
             conn.delete(user_dn)
-            hint = ""
-            if not cfg.use_ssl and not cfg.use_start_tls:
-                hint = " Hint: Password changes require an encrypted connection. Enable StartTLS (recommended) or LDAPS in AD connection settings."
-            raise HTTPException(400, f"Failed to set password: {pwd_err}.{hint}")
+            if str(pwd_err).lower() == "constraintviolation":
+                raise HTTPException(400, "Failed to set password: Password does not meet AD complexity requirements.")
+            raise HTTPException(400, f"Failed to set password: {pwd_err}.")
 
         # Build UAC
         uac = _build_user_uac(
