@@ -745,6 +745,11 @@ const ADScanner = () => {
   const users = scanData?.users || []
   const riskBreakdown = scanData?.risk_breakdown || []
   const riskLevels = scanData?.risk_levels || {}
+  const currentConnectionSource = !isConnected
+    ? String(scan?.scan_source || 'LDAP').toUpperCase()
+    : (connection?.config?.use_ssl || Number(connection?.config?.port) === 636)
+      ? 'LDAPS'
+      : (connection?.config?.use_start_tls ? 'STARTTLS' : 'LDAP')
 
   const SYSTEM_ACCOUNTS = ['guest', 'krbtgt']
   const isSystemAccount = (sam) => SYSTEM_ACCOUNTS.includes(String(sam || '').toLowerCase())
@@ -1127,7 +1132,10 @@ const ADScanner = () => {
             <h2 className="text-lg font-bold text-gray-800 mb-4">Last Scan Information</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div><span className="text-gray-500">Scan Time:</span><br /><strong>{formatScanTimestamp(scan.scan_timestamp)}</strong></div>
-              <div><span className="text-gray-500">Source:</span><br /><strong className="uppercase">{scan.scan_source === 'ldap' && connection?.config?.use_ssl ? 'ldaps' : scan.scan_source}</strong></div>
+              <div>
+                <span className="text-gray-500">Source:</span><br />
+                <strong>{currentConnectionSource}</strong>
+              </div>
               <div><span className="text-gray-500">Duration:</span><br /><strong>{scan.scan_duration_ms}ms</strong></div>
               <div><span className="text-gray-500">Enabled/Disabled:</span><br /><strong>{scan.enabled_users} / {scan.disabled_users}</strong></div>
             </div>
