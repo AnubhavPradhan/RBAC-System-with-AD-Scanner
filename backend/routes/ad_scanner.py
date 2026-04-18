@@ -3,6 +3,7 @@ AD Scanner API routes.
 """
 import asyncio
 import json
+import re
 import threading
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -1770,6 +1771,62 @@ class ADUserPasswordResetRequest(BaseModel):
     new_password: str
 
 
+def _map_ad_password_reset_error(conn, secure_channel: bool) -> HTTPException:
+    """Translate ldap3 result into a user-actionable HTTP error."""
+    result = conn.result or {}
+    description = str(result.get("description") or "Unknown error")
+    message = str(result.get("message") or "").strip()
+    desc_lower = description.lower()
+    msg_lower = message.lower()
+
+    if desc_lower in {"constraintviolation", "constraint violation"}:
+        return HTTPException(400, "Password does not meet AD complexity/history requirements")
+
+    if desc_lower in {"insufficientaccessrights", "insufficient access rights"} or "access denied" in msg_lower:
+        return HTTPException(403, "Access denied. Ensure the AD bind account has 'Reset password' permissions on the target user/OU")
+
+    if desc_lower == "unwillingtoperform":
+        ad_data_match = re.search(r"data\s+([0-9a-fA-F]{1,8})", message)
+        ad_data_code = ad_data_match.group(1).upper() if ad_data_match else ""
+
+        if not secure_channel:
+            return HTTPException(400, "AD rejected password reset because the LDAP session is not encrypted. Use LDAPS (636) or StartTLS.")
+
+        # Common AD extended error diagnostics for password operations.
+        if ad_data_code in {"52D", "0000052D"}:
+            return HTTPException(400, "Password violates AD policy (length/complexity/history). Choose a stronger password that was not recently used.")
+        if ad_data_code in {"5", "00000005"}:
+            return HTTPException(403, "Access denied by AD. Delegate 'Reset password' and 'Write lockoutTime/pwdLastSet' permissions to the bind account on the target OU.")
+        if ad_data_code in {"56", "00000056"}:
+            return HTTPException(400, "AD rejected the password operation. Ensure this is a reset (admin right) and not a change requiring the current password.")
+
+        diag_suffix = f" AD diagnostic code: {ad_data_code}." if ad_data_code else ""
+        return HTTPException(
+            400,
+            "AD returned unwillingToPerform for password reset. This is usually caused by password policy/history restrictions or missing delegated reset permission for the bind account." + diag_suffix,
+        )
+
+    if message:
+        return HTTPException(400, f"Password reset failed: {description} ({message})")
+    return HTTPException(400, f"Password reset failed: {description}")
+
+
+def _password_contains_identity_fragments(password: str, sam_account_name: str, display_name: str) -> bool:
+    """AD policy often rejects passwords containing >=3-char fragments of account/display name."""
+    pwd = str(password or "").lower()
+    sam = str(sam_account_name or "").lower()
+    display = str(display_name or "").lower()
+
+    # Match common AD complexity behavior: contiguous fragments with length >= 3.
+    tokens = set()
+    for value in (sam.replace('.', ' ').replace('_', ' ').replace('-', ' '), display):
+        for token in value.split():
+            t = token.strip()
+            if len(t) >= 3:
+                tokens.add(t)
+    return any(token in pwd for token in tokens)
+
+
 @router.post("/users/{sam_account_name}/reset-password")
 def reset_ad_user_password(sam_account_name: str, body: ADUserPasswordResetRequest,
                            current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -1785,37 +1842,49 @@ def reset_ad_user_password(sam_account_name: str, body: ADUserPasswordResetReque
     conn, cfg = _get_ldap_conn(db)
     try:
         from ldap3 import SUBTREE, MODIFY_REPLACE
-        
-        # Verify connection is secure (SSL or StartTLS)
-        if not (cfg.use_ssl or cfg.use_start_tls):
+
+        # Verify an encrypted channel is actually active (not only configured).
+        secure_channel = bool(
+            getattr(getattr(conn, "server", None), "ssl", False) or
+            getattr(conn, "tls_started", False)
+        )
+        if not secure_channel:
             raise HTTPException(400, "Password reset requires SSL or StartTLS connection for security")
         
         # Find the user
-        conn.search(cfg.base_dn, f"(&(objectClass=user)(sAMAccountName={sam_account_name}))",
-                     search_scope=SUBTREE, attributes=["distinguishedName"])
+        conn.search(
+            cfg.base_dn,
+            f"(&(objectClass=user)(sAMAccountName={sam_account_name}))",
+            search_scope=SUBTREE,
+            attributes=["distinguishedName", "displayName", "sAMAccountName"],
+        )
         if not conn.entries:
             raise HTTPException(404, f"User '{sam_account_name}' not found in AD")
         
-        user_dn = str(conn.entries[0].distinguishedName)
-        
-        # Reset password by setting unicodePwd attribute
-        # In AD, passwords must be UTF-16LE encoded and wrapped in quotes
-        password_bytes = f'"{body.new_password}"'.encode('utf-16-le')
-        
-        changes = {
-            "unicodePwd": [(MODIFY_REPLACE, [password_bytes])]
-        }
-        
-        ok = conn.modify(user_dn, changes)
+        entry = conn.entries[0]
+        user_dn = str(entry.distinguishedName)
+        resolved_sam = str(entry.sAMAccountName) if getattr(entry, "sAMAccountName", None) else sam_account_name
+        resolved_display_name = str(entry.displayName) if getattr(entry, "displayName", None) else ""
+
+        if _password_contains_identity_fragments(body.new_password, resolved_sam, resolved_display_name):
+            raise HTTPException(
+                400,
+                "Password cannot contain parts of the user's account name or display name (minimum 3 consecutive characters).",
+            )
+
+        # Prefer AD-native helper for password reset; fallback to unicodePwd replace.
+        ok = False
+        try:
+            ok = conn.extend.microsoft.modify_password(user_dn, body.new_password)
+        except Exception:
+            ok = False
+
         if not ok:
-            error_desc = conn.result.get('description', 'Unknown error')
-            # Common AD errors for password resets
-            if 'constraint violation' in error_desc.lower():
-                raise HTTPException(400, "Password does not meet AD complexity requirements")
-            elif 'access denied' in error_desc.lower():
-                raise HTTPException(403, "Access denied. Ensure bind account has permissions to reset passwords")
-            else:
-                raise HTTPException(400, f"Password reset failed: {error_desc}")
+            password_bytes = f'"{body.new_password}"'.encode('utf-16-le')
+            ok = conn.modify(user_dn, {"unicodePwd": [(MODIFY_REPLACE, [password_bytes])]})
+
+        if not ok:
+            raise _map_ad_password_reset_error(conn, secure_channel)
         
         conn.unbind()
         

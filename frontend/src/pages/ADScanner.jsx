@@ -2182,6 +2182,9 @@ const ADScanner = () => {
                 {!userForm.logon_to_all_computers && (
                   <div className="space-y-3">
                     <p className="text-xs text-gray-500">Select one or more computers. These are stored in AD as workstation restrictions.</p>
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      This AD restriction is primarily enforced for Windows domain logon. Linux clients (for example SSSD/realmd) may still allow sign-in unless host-side access control is configured.
+                    </div>
                     {computersLoading ? (
                       <p className="text-sm text-gray-500">Loading computers...</p>
                     ) : computers.length === 0 ? (
