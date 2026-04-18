@@ -47,8 +47,11 @@ def _time_policy_allowed(db: Session, user: User) -> bool:
     now_day = datetime.now(NEPAL_TZ).strftime("%a")
 
     if user.time_override_enabled:
-        days = [d for d in (user.allowed_days or "").split(",") if d]
-        allowed_days = days or ALL_DAYS
+        days = [d.strip() for d in (user.allowed_days or "").split(",") if d.strip()]
+        # If override is enabled and no days are selected, deny all access.
+        allowed_days = days
+        if not allowed_days:
+            return False
         if now_day not in allowed_days:
             return False
         return _is_now_within_window(user.access_start_time or "00:00", user.access_end_time or "23:59")
@@ -57,8 +60,11 @@ def _time_policy_allowed(db: Session, user: User) -> bool:
     if not role or not role.time_restricted:
         return True
 
-    days = [d for d in (role.allowed_days or "").split(",") if d]
-    allowed_days = days or ALL_DAYS
+    days = [d.strip() for d in (role.allowed_days or "").split(",") if d.strip()]
+    # If role policy is enabled and no days are selected, deny all access.
+    allowed_days = days
+    if not allowed_days:
+        return False
     if now_day not in allowed_days:
         return False
     return _is_now_within_window(role.access_start_time or "00:00", role.access_end_time or "23:59")

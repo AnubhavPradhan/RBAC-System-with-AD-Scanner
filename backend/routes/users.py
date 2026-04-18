@@ -10,6 +10,16 @@ from database import get_db, User, AuditLog
 from auth import get_current_user, hash_password, validate_password_strength
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
+ALL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def _normalize_days(days: Optional[list[str]]) -> list[str]:
+    if not days:
+        return []
+    valid = set(ALL_DAYS)
+    normalized = [str(d).strip() for d in days if str(d).strip() in valid]
+    # Keep insertion order while removing duplicates
+    return list(dict.fromkeys(normalized))
 
 
 class UserCreate(BaseModel):
@@ -20,7 +30,7 @@ class UserCreate(BaseModel):
     role: Optional[str] = "Viewer"
     status: Optional[str] = "Active"
     time_override_enabled: Optional[bool] = False
-    allowed_days: Optional[list[str]] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    allowed_days: Optional[list[str]] = None
     access_start_time: Optional[str] = "00:00"
     access_end_time: Optional[str] = "23:59"
 
@@ -33,13 +43,13 @@ class UserUpdate(BaseModel):
     role: str
     status: str
     time_override_enabled: Optional[bool] = False
-    allowed_days: Optional[list[str]] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    allowed_days: Optional[list[str]] = None
     access_start_time: Optional[str] = "00:00"
     access_end_time: Optional[str] = "23:59"
 
 
 def _user_dict(u: User) -> dict:
-    allowed_days = [d for d in (u.allowed_days or "").split(",") if d]
+    allowed_days = [d.strip() for d in (u.allowed_days or "").split(",") if d.strip()]
     return {
         "id": u.id, "name": u.name, "username": u.username,
         "email": u.email, "role": u.role, "status": u.status,
@@ -72,12 +82,14 @@ def create_user(body: UserCreate, current_user: User = Depends(get_current_user)
     if not is_valid:
         raise HTTPException(400, msg)
 
+    normalized_days = ALL_DAYS if body.allowed_days is None else _normalize_days(body.allowed_days)
+
     new_user = User(
         name=body.name, username=body.username or None, email=body.email,
         password=hash_password(raw_password),
         role=body.role or "Viewer", status=body.status or "Active",
         time_override_enabled=bool(body.time_override_enabled),
-        allowed_days=",".join(body.allowed_days or ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]),
+        allowed_days=",".join(normalized_days),
         access_start_time=body.access_start_time or "00:00",
         access_end_time=body.access_end_time or "23:59",
     )
@@ -99,13 +111,15 @@ def update_user(user_id: int, body: UserUpdate, current_user: User = Depends(get
     if not user:
         raise HTTPException(404, "User not found")
 
+    normalized_days = ALL_DAYS if body.allowed_days is None else _normalize_days(body.allowed_days)
+
     user.name = body.name
     user.username = body.username or None
     user.email = body.email
     user.role = body.role
     user.status = body.status
     user.time_override_enabled = bool(body.time_override_enabled)
-    user.allowed_days = ",".join(body.allowed_days or ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+    user.allowed_days = ",".join(normalized_days)
     user.access_start_time = body.access_start_time or "00:00"
     user.access_end_time = body.access_end_time or "23:59"
     if body.password and body.password.strip():

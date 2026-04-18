@@ -6,6 +6,15 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const ROLE_ORDER_STORAGE_KEY = 'roles-card-order'
 const DEPRECATED_PERMISSIONS = new Set(['manage_permissions', 'view_analytics'])
 
+const normalizeAllowedDays = (days) => {
+  if (!Array.isArray(days)) return [...DAYS]
+  const valid = new Set(DAYS)
+  const normalized = days
+    .map((d) => String(d || '').trim())
+    .filter((d) => valid.has(d))
+  return [...new Set(normalized)]
+}
+
 const isVisiblePermission = (permission = '') => !DEPRECATED_PERMISSIONS.has(permission)
 
 const formatPermissionLabel = (name = '') =>
@@ -119,6 +128,7 @@ const Roles = () => {
     e.preventDefault()
     const payload = {
       ...formData,
+      allowed_days: normalizeAllowedDays(formData.allowed_days),
       permissions: formData.permissions.filter(isVisiblePermission)
     }
 
@@ -149,12 +159,13 @@ const Roles = () => {
 
   const handleEditRole = (role) => {
     setEditingRole(role)
+    const normalizedDays = normalizeAllowedDays(role.allowed_days)
     setFormData({
       name: role.name,
       description: role.description,
       permissions: [...(role.permissions || [])].filter(isVisiblePermission),
       time_restricted: !!role.time_restricted,
-      allowed_days: Array.isArray(role.allowed_days) && role.allowed_days.length > 0 ? [...role.allowed_days] : [...DAYS],
+      allowed_days: normalizedDays,
       access_start_time: role.access_start_time || '09:00',
       access_end_time: role.access_end_time || '18:00'
     })

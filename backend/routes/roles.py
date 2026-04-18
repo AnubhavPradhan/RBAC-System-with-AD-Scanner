@@ -10,6 +10,16 @@ from database import get_db, Role, Permission, User, AuditLog, role_permissions
 from auth import get_current_user
 
 router = APIRouter(prefix="/api/roles", tags=["Roles"])
+ALL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def _normalize_days(days: Optional[List[str]]) -> list[str]:
+    if not days:
+        return []
+    valid = set(ALL_DAYS)
+    normalized = [str(d).strip() for d in days if str(d).strip() in valid]
+    # Keep insertion order while removing duplicates
+    return list(dict.fromkeys(normalized))
 
 
 class RoleBody(BaseModel):
@@ -17,7 +27,7 @@ class RoleBody(BaseModel):
     description: Optional[str] = ""
     permissions: List[str] = []
     time_restricted: Optional[bool] = False
-    allowed_days: List[str] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    allowed_days: Optional[List[str]] = None
     access_start_time: Optional[str] = "00:00"
     access_end_time: Optional[str] = "23:59"
 
@@ -25,7 +35,7 @@ class RoleBody(BaseModel):
 def _role_dict(db: Session, role: Role) -> dict:
     perm_names = [p.name for p in role.permissions]
     user_count = db.query(User).filter(User.role == role.name).count()
-    allowed_days = [d for d in (role.allowed_days or "").split(",") if d]
+    allowed_days = [d.strip() for d in (role.allowed_days or "").split(",") if d.strip()]
     return {
         "id": role.id, "name": role.name, "description": role.description,
         "created_at": str(role.created_at), "permissions": perm_names, "users": user_count,
@@ -52,7 +62,8 @@ def create_role(body: RoleBody, current_user: User = Depends(get_current_user), 
 
     role = Role(name=body.name, description=body.description or "")
     role.time_restricted = bool(body.time_restricted)
-    role.allowed_days = ",".join(body.allowed_days or ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+    normalized_days = ALL_DAYS if body.allowed_days is None else _normalize_days(body.allowed_days)
+    role.allowed_days = ",".join(normalized_days)
     role.access_start_time = body.access_start_time or "00:00"
     role.access_end_time = body.access_end_time or "23:59"
     db.add(role)
@@ -78,7 +89,8 @@ def update_role(role_id: int, body: RoleBody, current_user: User = Depends(get_c
     role.name = body.name
     role.description = body.description or ""
     role.time_restricted = bool(body.time_restricted)
-    role.allowed_days = ",".join(body.allowed_days or ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+    normalized_days = ALL_DAYS if body.allowed_days is None else _normalize_days(body.allowed_days)
+    role.allowed_days = ",".join(normalized_days)
     role.access_start_time = body.access_start_time or "00:00"
     role.access_end_time = body.access_end_time or "23:59"
 
