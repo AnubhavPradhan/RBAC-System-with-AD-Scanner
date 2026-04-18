@@ -4,6 +4,15 @@ import api from '../utils/api'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+const normalizeAllowedDays = (days) => {
+  if (!Array.isArray(days)) return [...DAYS]
+  const valid = new Set(DAYS)
+  const normalized = days
+    .map((d) => String(d || '').trim())
+    .filter((d) => valid.has(d))
+  return [...new Set(normalized)]
+}
+
 const validatePasswordStrength = (password) => {
   if (!password || password.length < 8) {
     return 'Password must be 8 characters long with at least one uppercase letter, one number, and one symbol.'
@@ -126,11 +135,15 @@ const Users = () => {
       }
     }
     try {
+      const payload = {
+        ...formData,
+        allowed_days: normalizeAllowedDays(formData.allowed_days),
+      }
       if (editingUser) {
-        const { data } = await api.put(`/users/${editingUser.id}`, formData)
+        const { data } = await api.put(`/users/${editingUser.id}`, payload)
         setUsers(users.map(u => u.id === editingUser.id ? data : u))
       } else {
-        const { data } = await api.post('/users', formData)
+        const { data } = await api.post('/users', payload)
         setUsers([...users, data])
       }
       setFormData({
@@ -155,6 +168,7 @@ const Users = () => {
 
   const handleEditUser = (user) => {
     setEditingUser(user)
+    const normalizedDays = normalizeAllowedDays(user.allowed_days)
     setFormData({
       name: user.name,
       username: user.username || '',
@@ -163,7 +177,7 @@ const Users = () => {
       role: user.role,
       status: user.status,
       time_override_enabled: !!user.time_override_enabled,
-      allowed_days: Array.isArray(user.allowed_days) && user.allowed_days.length > 0 ? [...user.allowed_days] : [...DAYS],
+      allowed_days: normalizedDays,
       access_start_time: user.access_start_time || '09:00',
       access_end_time: user.access_end_time || '18:00'
     })
