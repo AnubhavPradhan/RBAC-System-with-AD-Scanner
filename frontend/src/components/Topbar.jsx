@@ -6,6 +6,7 @@ import api from '../utils/api'
 
 const OBJECT_FILTERS = ['All', 'user', 'group', 'ou', 'computer']
 const ACTION_FILTERS = ['All', 'added', 'edited', 'deleted']
+const AD_NOTIFICATIONS_CLEARED_AT_KEY = 'ad-notifications-cleared-at'
 
 const Topbar = () => {
   const navigate = useNavigate()
@@ -18,6 +19,7 @@ const Topbar = () => {
   const [objectFilter, setObjectFilter] = useState('All')
   const [actionFilter, setActionFilter] = useState('All')
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [lastClearedAt, setLastClearedAt] = useState(() => localStorage.getItem(AD_NOTIFICATIONS_CLEARED_AT_KEY) || '')
 
   const panelRef = useRef(null)
   const openRef = useRef(false)
@@ -46,11 +48,20 @@ const Topbar = () => {
 
     let mounted = true
 
+    const isAfterClearCutoff = (entry) => {
+      if (!lastClearedAt) return true
+      const ts = entry?.timestamp ? Date.parse(entry.timestamp) : NaN
+      const cutoff = Date.parse(lastClearedAt)
+      if (Number.isNaN(ts) || Number.isNaN(cutoff)) return true
+      return ts > cutoff
+    }
+
     const loadRecent = async () => {
       try {
         const { data } = await api.get('/ad-scanner/notifications/recent?limit=30')
         if (!mounted) return
-        setItems(Array.isArray(data.items) ? data.items : [])
+        const recentItems = Array.isArray(data.items) ? data.items : []
+        setItems(recentItems.filter(isAfterClearCutoff))
       } catch (err) {
         console.error('Failed to load AD notifications:', err)
       }
@@ -64,6 +75,7 @@ const Topbar = () => {
       try {
         const payload = JSON.parse(event.data)
         if (!mounted) return
+        if (!isAfterClearCutoff(payload)) return
 
         setItems((prev) => {
           const key = `${payload.timestamp}-${payload.object_type}-${payload.name}-${payload.action}`
@@ -86,7 +98,7 @@ const Topbar = () => {
       mounted = false
       es.close()
     }
-  }, [isAdmin])
+  }, [isAdmin, lastClearedAt])
 
   useEffect(() => {
     if (open) {
@@ -110,6 +122,9 @@ const Topbar = () => {
   const handleClearNotifications = async () => {
     try {
       await api.delete('/ad-scanner/notifications')
+      const clearedAt = new Date().toISOString()
+      localStorage.setItem(AD_NOTIFICATIONS_CLEARED_AT_KEY, clearedAt)
+      setLastClearedAt(clearedAt)
       setItems([])
       setUnreadCount(0)
     } catch (err) {

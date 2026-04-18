@@ -1390,7 +1390,7 @@ def create_ad_user(body: ADUserCreateRequest, current_user: User = Depends(get_c
         if not (cfg.use_ssl or cfg.use_start_tls):
             raise HTTPException(
                 400,
-                "User creation requires an encrypted AD connection. Enable StartTLS (recommended) or LDAPS and reconnect.",
+                "User creation requires an encrypted AD connection. Enable LDAPS and reconnect.",
             )
 
         upn_name, pre_windows_name = _get_user_identity_values(body)
@@ -1790,7 +1790,7 @@ def _map_ad_password_reset_error(conn, secure_channel: bool) -> HTTPException:
         ad_data_code = ad_data_match.group(1).upper() if ad_data_match else ""
 
         if not secure_channel:
-            return HTTPException(400, "AD rejected password reset because the LDAP session is not encrypted. Use LDAPS (636) or StartTLS.")
+            return HTTPException(400, "AD rejected password reset because the LDAP session is not encrypted. Use LDAPS (636).")
 
         # Common AD extended error diagnostics for password operations.
         if ad_data_code in {"52D", "0000052D"}:
@@ -1849,7 +1849,7 @@ def reset_ad_user_password(sam_account_name: str, body: ADUserPasswordResetReque
             getattr(conn, "tls_started", False)
         )
         if not secure_channel:
-            raise HTTPException(400, "Password reset requires SSL or StartTLS connection for security")
+            raise HTTPException(400, "Password reset requires SSL connection for security")
         
         # Find the user
         conn.search(
