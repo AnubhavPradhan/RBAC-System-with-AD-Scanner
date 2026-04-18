@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import api from '../utils/api'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import ExcelJS from 'exceljs'
 
 // ─── Export Helpers ────────────────────────────────────────────────────────────
 const toTitle = (value) => String(value || '')
@@ -24,7 +25,7 @@ const formatNepalDateTime = (value) => {
   }).format(date)
 }
 
-const formatCsvCell = (key, value) => {
+const formatExportCell = (key, value) => {
   if (value === null || value === undefined || value === '') return '-'
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
   if (Array.isArray(value)) return value.join(' | ')
@@ -34,8 +35,22 @@ const formatCsvCell = (key, value) => {
   return String(value)
 }
 
-const exportToCSV = (data, filename, reportName = 'Report') => {
+const toExcelColumnName = (index) => {
+  let columnIndex = index
+  let name = ''
+  while (columnIndex > 0) {
+    const remainder = (columnIndex - 1) % 26
+    name = String.fromCharCode(65 + remainder) + name
+    columnIndex = Math.floor((columnIndex - 1) / 26)
+  }
+  return name
+}
+
+const exportToExcel = async (data, filename, reportName = 'Report') => {
   if (!data || !data.length) return alert('No data to export')
+
+  const workbook = new ExcelJS.Workbook()
+  const worksheet = workbook.addWorksheet('Report')
   const headers = Object.keys(data[0])
   const labelMap = {
     sam_account_name: 'SAM Account',
@@ -46,22 +61,93 @@ const exportToCSV = (data, filename, reportName = 'Report') => {
     user_count: 'Assigned Users',
   }
 
-  const csvRows = []
-  csvRows.push([`Report: ${reportName}`])
-  csvRows.push([`Generated (NPT): ${formatNepalDateTime(new Date().toISOString())}`])
-  csvRows.push([`Total Records: ${data.length}`])
-  csvRows.push([])
-  csvRows.push(headers.map((h) => labelMap[h] || toTitle(h)))
+  const visibleHeaders = headers.map((h) => labelMap[h] || toTitle(h))
+  const dataRows = data.map((row) => headers.map((key) => formatExportCell(key, row[key])))
 
-  for (const row of data) {
-    csvRows.push(headers.map((key) => formatCsvCell(key, row[key])))
+  worksheet.columns = headers.map((header, index) => {
+    const displayHeader = visibleHeaders[index]
+    const maxContentLength = Math.max(
+      displayHeader.length,
+      ...dataRows.map((r) => String(r[index] || '').length),
+    )
+    return {
+      key: header,
+      width: Math.min(Math.max(maxContentLength + 4, 14), 42),
+      style: {
+        alignment: { vertical: 'top', horizontal: 'left', wrapText: true },
+      },
+    }
+  })
+
+  const lastCol = headers.length
+  const firstColLetter = 'A'
+  const lastColLetter = toExcelColumnName(lastCol)
+
+  worksheet.mergeCells(`${firstColLetter}1:${lastColLetter}1`)
+  worksheet.getCell('A1').value = reportName
+  worksheet.getCell('A1').font = { size: 16, bold: true, color: { argb: 'FF1F2937' } }
+  worksheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left' }
+  worksheet.getRow(1).height = 26
+
+  worksheet.mergeCells(`${firstColLetter}2:${lastColLetter}2`)
+  worksheet.getCell('A2').value = `Generated (NPT): ${formatNepalDateTime(new Date().toISOString())}`
+  worksheet.getCell('A2').font = { size: 11, color: { argb: 'FF4B5563' } }
+
+  worksheet.mergeCells(`${firstColLetter}3:${lastColLetter}3`)
+  worksheet.getCell('A3').value = `Total Records: ${data.length}`
+  worksheet.getCell('A3').font = { size: 11, color: { argb: 'FF4B5563' } }
+
+  const headerRowIndex = 5
+  const headerRow = worksheet.getRow(headerRowIndex)
+  headerRow.values = visibleHeaders
+  headerRow.height = 24
+
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 }
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E293B' },
+    }
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+      left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+      bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+      right: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+    }
+    cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true }
+  })
+
+  dataRows.forEach((rowValues, rowIndex) => {
+    const row = worksheet.addRow(rowValues)
+    row.height = 22
+    const isAlternateRow = rowIndex % 2 === 0
+    row.eachCell((cell) => {
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+      }
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: isAlternateRow ? 'FFF8FAFC' : 'FFFFFFFF' },
+      }
+      cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true }
+    })
+  })
+
+  worksheet.autoFilter = {
+    from: `${firstColLetter}${headerRowIndex}`,
+    to: `${lastColLetter}${headerRowIndex}`,
   }
+  worksheet.views = [{ state: 'frozen', ySplit: headerRowIndex }]
 
-  const csv = csvRows
-    .map((cols) => cols.map((col) => `"${String(col ?? '').replace(/"/g, '""')}"`).join(','))
-    .join('\n')
-
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = filename; a.click()
@@ -152,9 +238,9 @@ const Reports = () => {
     }
   }
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     if (!selectedReport || !reportData.length) return alert('Generate a report first')
-    exportToCSV(reportData, `${selectedReport.id}-report.csv`, selectedReport.name)
+    await exportToExcel(reportData, `${selectedReport.id}-report.xlsx`, selectedReport.name)
   }
 
   const handleExportJSON = () => {
@@ -291,7 +377,7 @@ const Reports = () => {
                   onClick={handleExportCSV}
                   className="bg-green-500 text-white py-2 px-4 rounded-lg hover:bg-green-600 transition-colors text-sm"
                 >
-                  Export CSV
+                  Export Excel
                 </button>
                 <button
                   onClick={handleExportJSON}
